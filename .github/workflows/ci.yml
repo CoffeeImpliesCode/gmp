@@ -1,0 +1,77 @@
+# Verification for the GMP 6.3.0 Zig package.
+#
+# Written for this fork. Upstream GMP ships no CI configuration that could be
+# reused, and none is imported: this workflow only runs this repository's own
+# steps.
+
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Zig 0.16.0
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      # Licence and provenance first: it needs no compiler and it is the check
+      # that must never be skipped.
+      - name: Licence and provenance gate
+        run: sh tools/provenance_gate.sh .
+
+      - name: Formatting
+        run: zig fmt --check build.zig build.zig.zon root.zig zig consumer
+
+      - name: Build
+        run: zig build -Doptimize=ReleaseSafe
+
+      - name: Tests (Debug)
+        run: zig build test -Doptimize=Debug
+
+      - name: Tests (ReleaseSafe)
+        run: zig build test -Doptimize=ReleaseSafe
+
+      - name: Smoke run
+        run: zig build smoke -Doptimize=ReleaseSafe
+
+      - name: Consumer package
+        working-directory: consumer
+        run: zig build run -Doptimize=ReleaseSafe
+
+  cross:
+    name: check ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-linux-gnu
+          - aarch64-linux-gnu
+          - aarch64-macos-none
+          - x86_64-windows-gnu
+          - riscv64-linux-gnu
+          - wasm32-wasi
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Zig 0.16.0
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      # One job per target so a failure names the target that failed. Nothing
+      # cross compiled is run here.
+      - name: Compile the library, the facade, the tests and the example
+        # wasm32-wasi has no signal support in its libc: invalid.c raises
+        # SIGFPE (src/invalid.c:80) and Makefile.am:285 compiles that file
+        # unconditionally, so the wasi signal.h refuses to be included. Keep
+        # the attempt visible; this does not claim WebAssembly support.
+        continue-on-error: ${{ matrix.target == 'wasm32-wasi' }}
+        run: zig build check -Dtarget=${{ matrix.target }} --summary all
+

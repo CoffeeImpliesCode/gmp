@@ -18,6 +18,12 @@
 //! Neither condition crashes GMP, so an assertion is not what a caller of this
 //! facade should be handed; the errors name the argument that was rejected and
 //! leave the state untouched.
+//!
+//! A `Rand` owns one `gmp_randstate_t`: `initMt` or `initDefault` produces it,
+//! `deinit` releases it, once per initialisation. Zig has no move, so a copy
+//! made by assignment is a second name for the same state and releasing both
+//! is a double free. `seed` replaces the contents of the state rather than
+//! replacing the state, so it costs nothing extra to release.
 
 const c = @import("c");
 
@@ -32,36 +38,55 @@ pub const Error = error{
 
 pub const Rand = struct {
     /// The GMP state itself, for the raw escape hatch (`gmp.c`).
+    ///
+    /// The field is reachable, so it is not read only by convention: a write
+    /// through `c` changes this state and `deinit` still releases what GMP
+    /// allocated for it.
     raw: c.gmp_randstate_t,
 
     /// The state as GMP's mutable C pointer, `gmp_randstate_ptr`. GMP writes
-    /// through this, so it is only available on a mutable value.
+    /// through this, so it is only available on a mutable value. The pointer
+    /// lives inside the receiver: it does not outlive this state and does not
+    /// survive a move.
     pub fn rawPtr(self: *Rand) c.gmp_randstate_ptr {
         return &self.raw[0];
     }
 
     /// The state as GMP's read-only C pointer, `gmp_randstate_srcptr`, which
-    /// is what `gmp_randinit_set` reads.
+    /// is what `gmp_randinit_set` reads. Like `rawPtr`, it points inside the
+    /// receiver and does not outlive it.
     pub fn rawSrcPtr(self: *const Rand) c.gmp_randstate_srcptr {
         return &self.raw[0];
     }
 
-    /// A state using the Mersenne Twister, the default generator.
+    /// A state using the Mersenne Twister, `gmp_randinit_mt`.
+    ///
+    /// It starts at GMP's fixed Mersenne Twister default table
+    /// (`rand/randmts.c:166-171`, `rand/randmt.c:410-414`), so the stream is
+    /// reproducible rather than random until `seed` is called. The facade draws
+    /// no entropy of its own and adds no seed source; GMP's own seeding note is
+    /// that the method for choosing a seed is critical where the numbers matter,
+    /// for instance when generating cryptographic keys
+    /// (`doc/gmp.texi:6153-6158`).
     pub fn initMt() Rand {
         var self: Rand = .{ .raw = undefined };
         c.gmp_randinit_mt(self.rawPtr());
         return self;
     }
 
-    /// A state using GMP's default generator, which is the Mersenne Twister
-    /// unless the library was configured differently.
+    /// A state using GMP's default generator, which is `gmp_randinit_mt` at
+    /// this pin (`rand/randdef.c:33-37`) and is unseeded in the same way.
     pub fn initDefault() Rand {
         var self: Rand = .{ .raw = undefined };
         c.gmp_randinit_default(self.rawPtr());
         return self;
     }
 
-    /// Release the state.
+    /// Release the state, `gmp_randclear`.
+    ///
+    /// The value is unusable afterwards and a second call is a double free.
+    /// One initialisation is one `deinit`: a copy made by assignment is a
+    /// second name for this same state and must not be released.
     pub fn deinit(self: *Rand) void {
         c.gmp_randclear(self.rawPtr());
     }
@@ -69,8 +94,11 @@ pub const Rand = struct {
     /// Reseed the generator from a machine word, GMP's `gmp_randseed_ui`.
     ///
     /// GMP expands the word into the whole state, so the same seed always
-    /// reproduces the same sequence. The word is the target's `unsigned long`,
-    /// so a seed above 2^32 only fits where that word is 64 bits.
+    /// reproduces the same sequence, and a different seed reproduces a
+    /// different one. The word is the target's `unsigned long`, so a seed
+    /// above 2^32 only fits where that word is 64 bits; GMP's own note is
+    /// that the seed's quality decides the quality of the sequences and that
+    /// the system clock is a poor source (`doc/gmp.texi:6153-6166`).
     pub fn seed(self: *Rand, value: c_ulong) void {
         c.gmp_randseed_ui(self.rawPtr(), value);
     }

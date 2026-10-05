@@ -4,13 +4,18 @@
 //! allocates with its own allocator and releases with `mpz_clear`. Nothing here
 //! installs allocator hooks, so memory always goes through GMP's
 //! `gmp_allocate_func` / `gmp_free_func` pair, the same pair every other GMP
-//! program uses.
+//! program uses. Those hooks are library-global rather than per value: a
+//! program that replaces them through `c.__gmp_set_memory_functions` changes the
+//! allocator for every value this facade owns, before and after the change.
 //!
 //! Conventions:
 //!
-//!   * `BigInt` is an owned value. `init` and `parse` produce one, `deinit`
-//!     releases it, and copying the struct moves the ownership, so exactly one
-//!     binding of a given value may be released.
+//!   * `BigInt` is an owned value. `init` and `parse` produce one and `deinit`
+//!     releases it, exactly once per value produced. Zig has no move: a copy
+//!     made by assignment, by a struct field, or by returning the value into a
+//!     second binding is a *second name for one GMP allocation*, so releasing
+//!     both names is a double free. `clone` is not a move; it is GMP's own copy
+//!     into a second, independently owned value.
 //!   * A method that mirrors a three argument GMP function writes the result
 //!     into the receiver: `result.mul(&a, &b)` is `mpz_mul(result, a, b)`.
 //!   * A method ending in `Assign` updates the receiver in place.
@@ -18,6 +23,8 @@
 //!     prototypes say so: an operand is declared `mpz_srcptr` and only a
 //!     result is declared `mpz_ptr`, which is what `rawSrcPtr` and `rawPtr`
 //!     produce.
+//!   * No method stores a pointer to the receiver, so a `BigInt` may live in a
+//!     `var` that moves in memory; it does not need a stable address.
 
 const std = @import("std");
 const c = @import("c");
@@ -37,6 +44,7 @@ pub const DivisionMode = enum {
     ceiling,
 };
 
+/// Errors from parsing text into a value.
 pub const ParseError = error{
     /// The text is not a valid number in the requested base: a digit outside
     /// the base, an empty string, a digit separator, a sign other than `-`, or
@@ -50,7 +58,10 @@ pub const ParseError = error{
     /// drops every remaining white space character while converting the body
     /// (`:119-120`). So `" 12"`, `"12 "` and `"1 2"` all parse as `12`.
     InvalidDigit,
-    /// The base is neither 0 (auto detect) nor in the documented range 2..62.
+    /// The base is neither 0, which `mpz_set_str` reads as prefix detection,
+    /// nor in the documented range 2..62. `mpz_set_str` rejects base 1 and a
+    /// negative base outright; see `base.zig` for the two readings of a zero
+    /// base.
     InvalidBase,
 };
 
@@ -58,14 +69,16 @@ pub const ParseError = error{
 ///
 /// There is no allocation error in this set, and that is the honest shape.
 /// GMP's allocating entry points do not report a failed allocation: the
-/// default allocator prints a message and aborts (`memory.c:42-58`), and
-/// `mpz_get_str` writes into the block it has just asked for without testing
-/// the result (`mpz/get_str.c:71-78`). A program that installs an allocator
-/// returning null gets a null dereference inside GMP, not an error to map, so
-/// an `error.OutOfMemory` here would promise a recovery GMP cannot perform.
-/// The null those rendering functions do return answers one question only, a
-/// base outside 2..62 (`mpz/get_str.c:53-69`, `mpq/get_str.c:41-42`), and that
-/// is rejected before either call.
+/// default allocator prints a message and aborts (`memory.c:53-58`), the
+/// manual forbids `allocate_function` and `reallocate_function` from
+/// returning `NULL` at all (`doc/gmp.texi:7487-7490`), and `mpz_get_str`
+/// writes into the block it has just asked for without testing the result
+/// (`mpz/get_str.c:71-78`). A program that installs an allocator returning
+/// null gets a null dereference inside GMP, not an error to map, so an
+/// `error.OutOfMemory` here would promise a recovery GMP cannot perform. The
+/// null those rendering functions do return answers one question only, a
+/// base outside 2..62 (`mpz/get_str.c:53-69`, `mpq/get_str.c:41-42`), and
+/// that is rejected before either call.
 pub const FormatError = error{
     /// The base is outside 2..62, the only range GMP's rendering functions and
     /// its digit count accept. Base 0 is a parsing convention; see `base.zig`.
@@ -76,10 +89,15 @@ pub const FormatError = error{
 };
 
 /// Result of `div`: both parts are owned by the caller.
+///
+/// `quotient` and `remainder` are two independent `mpz_t` values, so `deinit`
+/// releases both, once each. Copying the struct copies both names, not the
+/// allocations.
 pub const Division = struct {
     quotient: BigInt,
     remainder: BigInt,
 
+    /// Release both parts. A second call is a double free on each of them.
     pub fn deinit(self: *Division) void {
         self.quotient.deinit();
         self.remainder.deinit();
@@ -93,10 +111,16 @@ fn cmpToOrder(value: c_int) std.math.Order {
 pub const BigInt = struct {
     /// A NUL terminated string allocated by GMP, released with `deinit`.
     ///
-    /// `len` is the text length without the NUL. It is recorded rather than
-    /// recomputed because GMP's `free_function` contract is about the size of
-    /// the block, and for a string GMP allocated that block is exactly
+    /// The block belongs to GMP's allocator, not to a Zig one, and
+    /// `deinit` is the only release for it: `free` is the current
+    /// `gmp_free_func` only by default, and `std.heap` was never given the
+    /// block. `len` is the text length without the NUL. It is recorded rather
+    /// than recomputed because GMP's `free_function` contract is about the size
+    /// of the block, and for a string GMP allocated that block is exactly
     /// `len + 1` bytes.
+    ///
+    /// Zig has no move, so a copy made by assignment is a second name for one
+    /// block and `deinit` on both names is a double free.
     pub const OwnedString = struct {
         ptr: [*c]u8,
         len: usize,
@@ -110,6 +134,11 @@ pub const BigInt = struct {
 
         /// Release the buffer through GMP's own free function, with the size
         /// GMP allocated it with: the text plus its NUL.
+        ///
+        /// Call it once. `ptr` is never null and `len + 1` is the block size
+        /// GMP's contract expects (`doc/gmp.texi:7473-7478`), which a
+        /// replaceable allocator may rely on even though the default `free`
+        /// ignores it.
         pub fn deinit(self: OwnedString) void {
             memory.freeGmpMemory(self.ptr, self.len + 1);
         }
@@ -118,14 +147,18 @@ pub const BigInt = struct {
     /// The GMP value itself.
     ///
     /// Exposed so the raw escape hatch (`gmp.c`) can be used on facade values.
-    /// Treat it as read only unless the caller knows the GMP API.
+    /// The field is reachable, so it is not read only by convention: a write
+    /// through `c` changes this value and `deinit` still releases what GMP
+    /// allocated for it.
     raw: c.mpz_t,
 
     /// The value as GMP's mutable C pointer, `mpz_ptr`.
     ///
     /// GMP writes through this, so it is only available on a mutable value.
     /// `gmp.h` declares it as `__mpz_struct *`, which `translate-c` renders as
-    /// `[*c]struct___mpz_struct`.
+    /// `[*c]struct___mpz_struct`. The pointer lives inside the receiver: it is
+    /// valid until this value is released and does not survive a move, so a
+    /// caller that keeps it across either has to re-ask.
     pub fn rawPtr(self: *BigInt) c.mpz_ptr {
         return &self.raw[0];
     }
@@ -135,7 +168,8 @@ pub const BigInt = struct {
     /// `gmp.h` declares every operand GMP only reads with this type
     /// (`const __mpz_struct *`), so a `*const BigInt` goes straight into the
     /// raw C API: GMP's prototypes are const correct, and no cast is needed to
-    /// call them.
+    /// call them. Like `rawPtr`, it points inside the receiver and does not
+    /// outlive it.
     pub fn rawSrcPtr(self: *const BigInt) c.mpz_srcptr {
         return &self.raw[0];
     }
@@ -148,6 +182,10 @@ pub const BigInt = struct {
     }
 
     /// Release the limbs GMP allocated for this value.
+    ///
+    /// The value is unusable afterwards and a second call is a double free.
+    /// One `init` or `parse` is one `deinit`: a copy made by assignment is a
+    /// second name for this same GMP value and must not be released.
     pub fn deinit(self: *BigInt) void {
         c.mpz_clear(self.rawPtr());
     }
@@ -157,7 +195,8 @@ pub const BigInt = struct {
     ///
     /// `text` is a sentinel terminated string, which is what GMP reads: the
     /// pointer goes straight to `mpz_set_str`, with no copy and no allocation.
-    /// A string literal is already of that type.
+    /// A failed parse releases the half-built value, so an error leaves the
+    /// caller nothing to release.
     pub fn parse(text: [:0]const u8, base: u8) ParseError!BigInt {
         var self = BigInt.init();
         errdefer self.deinit();
@@ -165,7 +204,9 @@ pub const BigInt = struct {
         return self;
     }
 
-    /// Parse `text`, returning null instead of an error.
+    /// Parse `text`, returning null instead of an error. A `null` means the
+    /// same thing `error.InvalidDigit` and `error.InvalidBase` do, and a
+    /// non-null result owns a value the caller releases.
     pub fn parseOrNull(text: [:0]const u8, base: u8) ?BigInt {
         return parse(text, base) catch null;
     }
@@ -175,9 +216,10 @@ pub const BigInt = struct {
     /// `text` must be NUL terminated: `mpz_set_str` reads it as a C string and
     /// the pointer is passed through unchanged.
     ///
-    /// On failure the value is left in whatever state GMP leaves it in, which
-    /// the GMP manual declares undefined. Re-initialise the value after an
-    /// error instead of reading it.
+    /// On `error.InvalidBase` GMP is not called. On `error.InvalidDigit` the
+    /// value is unchanged as well: each failure return in `mpz_set_str`
+    /// (`mpz/set_str.c:62`, `:78`, `:126`) is on a path with no destination
+    /// write. The write at `:108` is a separate all-zeros success path.
     pub fn setStr(self: *BigInt, text: [:0]const u8, base: u8) ParseError!void {
         if (!bases.validInputBase(base)) return error.InvalidBase;
         if (c.mpz_set_str(self.rawPtr(), text.ptr, base) < 0) return error.InvalidDigit;
@@ -207,7 +249,9 @@ pub const BigInt = struct {
         c.mpz_set_d(self.rawPtr(), value);
     }
 
-    /// An independent copy of the value.
+    /// An independent copy of the value: a second GMP allocation with its own
+    /// limbs and its own `deinit`. Assigning the result elsewhere copies that
+    /// second name, not a further value.
     pub fn clone(self: *const BigInt) BigInt {
         var copy = BigInt.init();
         copy.set(self);
@@ -258,7 +302,8 @@ pub const BigInt = struct {
     }
 
     /// Exact division, `mpz_divexact`. `other` must divide `self` exactly and
-    /// must not be zero; GMP's behaviour is undefined otherwise.
+    /// must not be zero; GMP's behaviour is undefined otherwise. The quotient
+    /// is a new value the caller owns and releases with its own `deinit`.
     pub fn divexact(self: *const BigInt, other: *const BigInt) BigInt {
         var quotient = BigInt.init();
         c.mpz_divexact(quotient.rawPtr(), self.rawSrcPtr(), other.rawSrcPtr());
@@ -268,7 +313,8 @@ pub const BigInt = struct {
     /// Divide with an explicit rounding rule. `other` must not be zero.
     ///
     /// The three modes are GMP's `mpz_tdiv_qr`, `mpz_fdiv_qr` and
-    /// `mpz_cdiv_qr`; they differ exactly for negative operands.
+    /// `mpz_cdiv_qr`; they differ exactly for negative operands. Both results
+    /// are new values, owned by the returned `Division`.
     pub fn div(self: *const BigInt, other: *const BigInt, mode: DivisionMode) Division {
         var quotient = BigInt.init();
         var remainder = BigInt.init();
@@ -283,6 +329,8 @@ pub const BigInt = struct {
     /// `n mod d`, `mpz_mod`. `other` must not be zero.  The sign of the divisor
     /// is ignored and the result is never negative (doc/gmp.texi:3464-3465),
     /// so this is the floor-rule remainder, not the truncated one `div` gives.
+    /// The remainder is a new value the caller owns and releases with its own
+    /// `deinit`.
     pub fn mod(self: *const BigInt, other: *const BigInt) BigInt {
         var remainder = BigInt.init();
         c.mpz_mod(remainder.rawPtr(), self.rawSrcPtr(), other.rawSrcPtr());
@@ -488,14 +536,31 @@ pub const BigInt = struct {
         return if (self.raw[0]._mp_size < 0) -1 else 1;
     }
 
+    /// Whether the value is zero, `_mp_size == 0`.
+    ///
+    /// GMP 6.3 has no `mpz_sgn` function: `gmp-h.in:2252` defines it as the
+    /// macro `((Z)->_mp_size < 0 ? -1 : (Z)->_mp_size > 0)`, which has no
+    /// translation, and there is no `mpz/sgn.c`, so this reads the documented
+    /// field directly, the way `sign` does. What it reads is GMP's own size:
+    /// `mpz_size` is that field's absolute value (`gmp-h.in:1879-1883`), and
+    /// the manual states a zero size for a zero value
+    /// (`doc/gmp.texi:4247-4249`). So this is GMP's own test, and exactly one
+    /// of `isZero`, `isNegative` and `isPositive` is true of any value.
     pub fn isZero(self: *const BigInt) bool {
         return self.raw[0]._mp_size == 0;
     }
 
+    /// Whether the value is negative, `_mp_size < 0`: the negative half of the
+    /// same `mpz_sgn` macro `isZero` describes. A value of zero is not
+    /// negative, and there is no negative zero to be: the sign lives in the
+    /// size and a size of zero carries none.
     pub fn isNegative(self: *const BigInt) bool {
         return self.raw[0]._mp_size < 0;
     }
 
+    /// Whether the value is positive, `_mp_size > 0`: the positive half of the
+    /// same `mpz_sgn` macro `isZero` describes. A value of zero is not
+    /// positive.
     pub fn isPositive(self: *const BigInt) bool {
         return self.raw[0]._mp_size > 0;
     }
@@ -510,6 +575,16 @@ pub const BigInt = struct {
         return c.mpz_tstbit(self.rawSrcPtr(), 0) != 0;
     }
 
+    /// Whether the value is even, GMP's `mpz_even_p`.
+    ///
+    /// The exact complement of `isOdd`, and for the reason `isOdd` gives:
+    /// `gmp-h.in:2286` defines `mpz_even_p(z)` as `(! mpz_odd_p (z))`, and
+    /// `mpz_tstbit` answers with 0 or 1 and nothing else (`mpz/tstbit.c:79`),
+    /// so the two ask the same question of the same call and cannot disagree.
+    /// Zero is even, and so is a negative even value: for a negative operand
+    /// `mpz_tstbit` builds the two's complement of the limb it is about to test
+    /// before it tests bit 0 (`mpz/tstbit.c:64-77`), which is why this answers
+    /// for a negative value at all.
     pub fn isEven(self: *const BigInt) bool {
         return c.mpz_tstbit(self.rawSrcPtr(), 0) == 0;
     }
@@ -578,7 +653,8 @@ pub const BigInt = struct {
     /// GMP writes the NUL terminated text straight into `buffer`; this wrapper
     /// allocates nothing and copies nothing. The returned slice is the text
     /// without the NUL, sentinel typed so it can be fed straight back into
-    /// `parse` or `setStr`, and it borrows `buffer`.
+    /// `parse` or `setStr`. It borrows `buffer` and is invalidated when the
+    /// caller writes `buffer` again or lets it out of scope.
     ///
     /// Capacity: `buffer.len` must be at least
     /// `mpz_sizeinbase(value, base) + 2`. Those two bytes are what the GMP

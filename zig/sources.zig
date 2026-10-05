@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: LGPL-3.0-or-later
 //! Exact C translation units that make up libgmp, mirrored from the GMP 6.3.0
 //! release tree.
 //!
@@ -24,6 +25,20 @@
 //!   * generated: `mpn/fib_table.c` and `mpn/mp_bases.c` are produced by the
 //!     host table generators `gen-fib` and `gen-bases` at build time; they do
 //!     not exist in the source tree.
+//!
+//! Three `mpn/generic` files are intentionally absent from that set, and all
+//! three are accounted for upstream rather than missed: `div_qr_1n_pi2.c` and
+//! `div_qr_1u_pi2.c` are tuning alternatives that appear nowhere in
+//! `configure.ac` (the `tune/` directory carries the selected variants), and
+//! `udiv_w_sdiv.c` is one of the `extra_functions` that only four CPU-family
+//! cases in `configure.ac:1339,1379,1691,1700` add, none of which this
+//! portable backend selects.
+//!
+//! The set is the same for `-Dlinkage=static` and `-Dlinkage=dynamic`:
+//! relocation is a code-generation flag on the module, not a different
+//! selection of sources. Its external link closure is libc alone - no
+//! translation unit here includes `<math.h>`, and every floating-point
+//! primitive GMP exposes is computed with integer arithmetic in `mpn`.
 
 /// Core sources sitting in the top-level GMP directory.
 pub const root = [_][]const u8{

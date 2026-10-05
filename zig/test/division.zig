@@ -8,6 +8,7 @@
 
 const std = @import("std");
 const gmp = @import("gmp");
+const bootstrap = @import("bootstrap.zig");
 
 const expectEqualStrings = std.testing.expectEqualStrings;
 const expectEqual = std.testing.expectEqual;
@@ -82,6 +83,7 @@ fn decimal(value: *const gmp.BigInt, buffer: []u8) ![:0]const u8 {
 }
 
 test "the three division rules match GMP's documented semantics" {
+    try bootstrap.ensureLoaded();
     for (cases) |case| {
         var numerator = try gmp.BigInt.parse(case.numerator, 10);
         defer numerator.deinit();
@@ -124,6 +126,7 @@ test "the three division rules match GMP's documented semantics" {
 }
 
 test "truncated division assigns into the receiver" {
+    try bootstrap.ensureLoaded();
     // `divAssign` follows GMP's `mpz_tdiv_q`, i.e. the quotient rounds toward
     // zero. The floor rule is reachable through `div(.., .floor)`.
     var negative = try gmp.BigInt.parse("-7", 10);
@@ -138,6 +141,7 @@ test "truncated division assigns into the receiver" {
 }
 
 test "modulo ignores the divisor's sign and is never negative" {
+    try bootstrap.ensureLoaded();
     // doc/gmp.texi:3464-3465: `mpz_mod` sets r to n mod d, "The sign of the
     // divisor is ignored; the result is always non-negative."  mpz/mod.c
     // takes a truncated remainder and adds the divisor's magnitude back when
@@ -167,6 +171,7 @@ test "modulo ignores the divisor's sign and is never negative" {
 }
 
 test "right shift of a negative value rounds toward minus infinity" {
+    try bootstrap.ensureLoaded();
     // mpz_fdiv_q_2exp: -7 / 2 = -3.5 floors to -4, it does not truncate to -3.
     var negative = try gmp.BigInt.parse("-7", 10);
     defer negative.deinit();
@@ -183,6 +188,7 @@ test "right shift of a negative value rounds toward minus infinity" {
 }
 
 test "exact division of negative operands" {
+    try bootstrap.ensureLoaded();
     // mpz_divexact is only defined for exact division, where the rounding
     // direction cannot matter.
     var a = try gmp.BigInt.parse("-1000000000000000000", 10);
@@ -199,6 +205,7 @@ test "exact division of negative operands" {
 }
 
 test "division of a multi limb operand keeps the identity" {
+    try bootstrap.ensureLoaded();
     // A dividend large enough to force GMP to grow its limb buffer.
     var big = gmp.BigInt.init();
     defer big.deinit();

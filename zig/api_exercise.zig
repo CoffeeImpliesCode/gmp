@@ -492,13 +492,13 @@ fn exerciseFloats(buffer: []u8) (Failure || float_module.ParseError || float_mod
     try expect(scaled.getPrecision() >= 512);
     try expect(scaled.getDouble() == 1.5);
 
-    // `mpf_add` and `mpf_sub` round to the destination's precision
-    // (doc/gmp.texi, "Floating Point Functions"), so this pair uses values that
-    // are exact in binary at every precision involved. 3.5 and 1.5 are exact
-    // three-bit significands, so `(1.5 + 2) - 1.5` is exactly 2 with no
-    // rounding to absorb. Adding the 256-bit square root instead would leave a
-    // rounding residue far below 1, and `cmpUnsignedWord` compares against the
-    // integer exactly.
+    // `mpf_add` and `mpf_sub` truncate to the destination's precision
+    // (`doc/gmp.texi:4700-4702`), so this pair uses values that are exact in
+    // binary at every precision involved. 3.5 and 1.5 are exact three-bit
+    // significands, so `(1.5 + 2) - 1.5` is exactly 2 with nothing truncated
+    // away. Adding the 256-bit square root instead would leave a truncation
+    // residue far below 1, and `cmpUnsignedWord` compares against the integer
+    // exactly.
     var sum = Float.init(128);
     defer sum.deinit();
     sum.add(&scaled, &two);

@@ -6,6 +6,7 @@
 
 const std = @import("std");
 const gmp = @import("gmp");
+const bootstrap = @import("bootstrap.zig");
 
 const expectEqualStrings = std.testing.expectEqualStrings;
 const expectError = std.testing.expectError;
@@ -13,6 +14,7 @@ const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;
 
 test "rationals are exact, and canonical only once the caller asks" {
+    try bootstrap.ensureLoaded();
     var third = try gmp.Rational.parse("1/3", 10);
     defer third.deinit();
 
@@ -75,6 +77,7 @@ test "rationals are exact, and canonical only once the caller asks" {
 }
 
 test "rational parsing rejects malformed text" {
+    try bootstrap.ensureLoaded();
     try expectError(error.InvalidDigit, gmp.Rational.parse("1/", 10));
     try expectError(error.InvalidDigit, gmp.Rational.parse("/2", 10));
     try expectError(error.InvalidDigit, gmp.Rational.parse("1/x", 10));
@@ -83,6 +86,7 @@ test "rational parsing rejects malformed text" {
 }
 
 test "the rational capacity bound is the manual's, and it is an upper bound" {
+    try bootstrap.ensureLoaded();
     var negative = try gmp.Rational.parse("-1/2", 10);
     defer negative.deinit();
 
@@ -110,6 +114,7 @@ test "the rational capacity bound is the manual's, and it is an upper bound" {
 }
 
 test "float rendering states its digit count and its capacity" {
+    try bootstrap.ensureLoaded();
     var value = try gmp.Float.parse("1.5", 128);
     defer value.deinit();
 
@@ -131,6 +136,7 @@ test "float rendering states its digit count and its capacity" {
 }
 
 test "floating point values have the published digits of sqrt(2)" {
+    try bootstrap.ensureLoaded();
     var two = try gmp.Float.parse("2", 256);
     defer two.deinit();
 
@@ -168,6 +174,7 @@ test "floating point values have the published digits of sqrt(2)" {
 }
 
 test "floating point arithmetic is exact where binary allows it" {
+    try bootstrap.ensureLoaded();
     var a = try gmp.Float.parse("0.1", 256);
     defer a.deinit();
     var b = try gmp.Float.parse("0.2", 256);
@@ -178,11 +185,11 @@ test "floating point arithmetic is exact where binary allows it" {
     sum.add(&a, &b);
 
     var buf: [32]u8 = undefined;
-    // 0.1 and 0.2 have no exact binary representation, so the sum is the
-    // correctly rounded value a shade above 0.3. Its first ten significant
-    // digits are 3000000000, of which `mpf_get_str` returns the significant
-    // ones only, with no radix point, so the text is "3" and a value between
-    // 0.1 and 1 has exponent 0.
+    // 0.1 and 0.2 have no exact binary representation, so at 256 bits each they
+    // sit a shade off their decimal values and the truncated sum lands a shade
+    // above 0.3. Its first ten significant digits are 3000000000, of which
+    // `mpf_get_str` returns the significant ones only, with no radix point, so
+    // the text is "3" and a value between 0.1 and 1 has exponent 0.
     const rendered = try sum.writeTo(&buf, 10, 10);
     try expectEqualStrings("3", rendered.text);
     try expectEqual(@as(i64, 0), rendered.exponent);
@@ -204,6 +211,7 @@ test "floating point arithmetic is exact where binary allows it" {
 }
 
 test "floating point parsing rejects malformed text" {
+    try bootstrap.ensureLoaded();
     var value = gmp.Float.init(64);
     defer value.deinit();
 
@@ -212,6 +220,7 @@ test "floating point parsing rejects malformed text" {
 }
 
 test "a seeded generator reproduces its sequence" {
+    try bootstrap.ensureLoaded();
     var first = gmp.Rand.initMt();
     defer first.deinit();
     var second = gmp.Rand.initMt();
@@ -237,6 +246,7 @@ test "a seeded generator reproduces its sequence" {
 }
 
 test "random draws respect their bound, and the degenerate ones draw nothing" {
+    try bootstrap.ensureLoaded();
     var state = gmp.Rand.initDefault();
     defer state.deinit();
     state.seed(42);
@@ -271,6 +281,7 @@ test "random draws respect their bound, and the degenerate ones draw nothing" {
 }
 
 test "the manual's two conditions are refused, and refusing moves nothing" {
+    try bootstrap.ensureLoaded();
     var state = gmp.Rand.initMt();
     defer state.deinit();
     state.seed(42);

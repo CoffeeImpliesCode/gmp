@@ -6,6 +6,11 @@
 //! verifies each line against the expected text and fails with an error if GMP
 //! disagrees, which makes `zig build smoke` a real check rather than a demo.
 //!
+//! In a runtime-loading build the provider is named on the command line
+//! (`--provider <path>`) or in `GMP_TEST_PROVIDER`, and the program says which
+//! configuration it is in on its first line. A linked build needs neither and
+//! reads neither.
+//!
 //! Output goes to stderr because that is where Zig's standard debug print
 //! writes, which keeps the example free of platform specific stdout handling.
 
@@ -23,13 +28,39 @@ fn report(label: []const u8, text: []const u8, expected: []const u8) Mismatch!vo
     }
 }
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     var version_buffer: [16]u8 = undefined;
     var buffer: [512]u8 = undefined;
 
+    // Nothing below can run in a runtime-loading build until a provider has
+    // been named and loaded, and that load is the one explicit step the
+    // contract asks for. It compiles away in a linked build, where the library
+    // is already there.
+    if (comptime gmp.runtime_loaded) {
+        try gmp.load(.{ .path = try gmp.providerRequest(init) });
+    }
+
     std.debug.print(
-        "GMP {s} (upstream {s}), portable C backend, {d}-bit limbs\n",
-        .{ try gmp.versionString(&version_buffer), gmp.upstream_version, gmp.limb_bits },
+        "GMP {s} (upstream {s}), portable C backend, {d}-bit limbs, {s} build\n",
+        .{
+            try gmp.versionString(&version_buffer),
+            gmp.upstream_version,
+            gmp.limb_bits,
+            if (gmp.runtime_loaded) "runtime-loaded" else "linked",
+        },
+    );
+
+    // The library's own idea of its version and its limb width, read from the
+    // provider's live data rather than from the macros this build was compiled
+    // against. They are the two words `runtime/library.zig` checks before a
+    // load is published, so printing them shows what the check saw.
+    const reported_version = gmp.providerVersion();
+    if (reported_version.len == 0) return error.GmpExampleMismatch;
+    const reported_limbs = gmp.providerBitsPerLimb().*;
+    if (reported_limbs != gmp.limb_bits) return error.GmpExampleMismatch;
+    std.debug.print(
+        "{s: <18}{s}, {d} bits per limb\n",
+        .{ "provider reports", reported_version, reported_limbs },
     );
 
     // Integers.
@@ -139,6 +170,54 @@ pub fn main() !void {
     defer raw.deinit();
     gmp.c.mpz_set_ui(raw.rawPtr(), 42);
     try report("raw mpz_set_ui", try raw.writeTo(&buffer, 10), "42");
+
+    // The `__gmp` spelling is the symbol the library really exports, and
+    // `mpz_set_ui` is a macro that aliases it, so both spellings have to reach
+    // the same library rather than one of them being a compile-time copy. The
+    // value below is the one above times a million, through the prefixed name.
+    var prefixed = gmp.BigInt.init();
+    defer prefixed.deinit();
+    gmp.c.__gmpz_mul_ui(prefixed.rawPtr(), raw.rawSrcPtr(), 1000000);
+    try report("raw __gmpz_mul_ui", try prefixed.writeTo(&buffer, 10), "42000000");
+
+    // Linked C varargs take individual arguments; routed wrappers take a
+    // tuple, and one value tuple feeds both. The three values carry their C
+    // types explicitly because those are the types the format reads: C
+    // default argument promotions put a string in front of `%s` as a
+    // NUL-terminated `char *` and each `%d` as an `int`, never as the array
+    // or the pointer-to-data it is written as in Zig. The buffer being
+    // rendered into lives in this frame, so it outlives the call the same way
+    // in either configuration, and the format string is a comptime constant
+    // that lives for the whole program.
+    var formatted: [64]u8 = undefined;
+    const format = "%s carries %d bits per limb, errno %d\n";
+    const name: [*:0]const u8 = "libgmp";
+    const errno_count: c_int = gmp.providerErrno().*;
+    const arguments = .{ name, reported_limbs, errno_count };
+    const written = if (comptime gmp.runtime_loaded)
+        gmp.c.__gmp_snprintf(&formatted, formatted.len, format, arguments)
+    else
+        @call(.auto, gmp.c.__gmp_snprintf, .{ &formatted, formatted.len, format } ++ arguments);
+    // A length past the end of the buffer would already have written out of
+    // bounds, so it is refused before it is used as a slice.
+    if (written <= 0 or written > @as(c_int, @intCast(formatted.len))) return error.GmpExampleMismatch;
+    const produced = formatted[0..@intCast(written)];
+    // What those three values have to render to. The limb width is the
+    // provider's own and is 32 on a 32-bit limb target, so the text is
+    // rendered from the same values with Zig's formatter rather than written
+    // out as one constant; GMP's `vsnprintf` path and Zig's formatter share
+    // no code, so agreeing with this text is the check.
+    var expected: [96]u8 = undefined;
+    const wanted = try std.fmt.bufPrint(
+        &expected,
+        "libgmp carries {d} bits per limb, errno {d}\n",
+        .{ reported_limbs, errno_count },
+    );
+    std.debug.print("{s: <18}{s}", .{ "raw __gmp_snprintf", produced });
+    if (!std.mem.eql(u8, produced, wanted)) {
+        std.debug.print("expected: {s}", .{wanted});
+        return error.GmpExampleMismatch;
+    }
 
     std.debug.print("all example results verified\n", .{});
 }

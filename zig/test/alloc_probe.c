@@ -16,12 +16,18 @@
    default `free` ignores its argument.
 
    The counters are thread local and only run while a test has enabled them,
-   so a test cannot be confused by allocations made elsewhere. */
+   so a test cannot be confused by allocations made elsewhere.
 
+   Installing the hooks is not this file's job. `mp_set_memory_functions` has
+   to be called on whichever GMP the test binary is talking to, which in a
+   runtime-loading build is the provider rather than a linked archive, so the
+   call is made from `alloc_probe.zig` through the package's own published
+   setter. What this file owns is the accounting and the three functions GMP
+   calls once they are installed. */
+
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include "gmp.h"
 
 static __thread int gmp_probe_counting;
 static __thread unsigned long gmp_probe_live;
@@ -93,8 +99,8 @@ probe_forget (void *ptr)
       }
 }
 
-static void
-probe_free (void *ptr, size_t size)
+void
+gmp_probe_free (void *ptr, size_t size)
 {
   if (ptr != NULL && gmp_probe_counting)
     {
@@ -104,8 +110,8 @@ probe_free (void *ptr, size_t size)
   free (ptr);
 }
 
-static void *
-probe_alloc (size_t size)
+void *
+gmp_probe_alloc (size_t size)
 {
   void *ptr = malloc (size);
 
@@ -120,17 +126,17 @@ probe_alloc (size_t size)
 /* GMP hands the realloc implementation both sizes, so a failed growth is
    visible as one extra live allocation. A successful resize is not: the block
    count is unchanged, only the size the block was taken with. */
-static void *
-probe_realloc (void *ptr, size_t old_size, size_t new_size)
+void *
+gmp_probe_realloc (void *ptr, size_t old_size, size_t new_size)
 {
   void *result;
 
   if (ptr == NULL)
-    return probe_alloc (new_size);
+    return gmp_probe_alloc (new_size);
 
   if (new_size == 0)
     {
-      probe_free (ptr, old_size);
+      gmp_probe_free (ptr, old_size);
       return NULL;
     }
 
@@ -145,34 +151,37 @@ probe_realloc (void *ptr, size_t old_size, size_t new_size)
   return result;
 }
 
-/* Start counting and route GMP's allocator through the probe. */
+/* Clear the bookkeeping and start counting on this thread.
+
+   Installing the hooks is `alloc_probe.zig`'s job, not this file's: it goes
+   through GMP's `mp_set_memory_functions`, and in a runtime-loading build that
+   call has to reach the provider through the generated dispatch rather than
+   through a link-time symbol. */
 void
-gmp_probe_enable (void)
+gmp_probe_reset (void)
 {
   memset (gmp_probe_blocks, 0, sizeof gmp_probe_blocks);
   gmp_probe_free_size_mismatch_count = 0;
   gmp_probe_live = 0;
   gmp_probe_counting = 1;
-  mp_set_memory_functions (probe_alloc, probe_realloc, probe_free);
 }
 
-/* Stop counting and restore GMP's default allocator. Passing null resets each
-   function to GMP's built-in one. */
+/* Stop counting. The hooks stay installed until the caller puts GMP's own
+   back, which it does the same way it took them out. */
 void
-gmp_probe_disable (void)
+gmp_probe_stop (void)
 {
   gmp_probe_counting = 0;
-  mp_set_memory_functions (NULL, NULL, NULL);
 }
 
-/* Number of live allocations made by this thread since `gmp_probe_enable`. */
+/* Number of live allocations made by this thread since `gmp_probe_reset`. */
 unsigned long
 gmp_probe_live_allocations (void)
 {
   return gmp_probe_live;
 }
 
-/* Number of releases since `gmp_probe_enable` that reported a size other than
+/* Number of releases since `gmp_probe_reset` that reported a size other than
    the one their block was allocated with. */
 unsigned long
 gmp_probe_free_size_mismatches (void)

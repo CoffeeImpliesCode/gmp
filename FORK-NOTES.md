@@ -799,3 +799,632 @@ two source lines, and both are recorded here.
 
 **Verification.** observed: 5 of 6 targets compile; `wasm32-wasi` fails as
 described.
+
+## 32. One licence label for an LGPL tree that also contains GPLv3, GFDL, Libtool and an X11 notice
+
+**Evidence.** A sweep of the imported tree for `either version 2 of the License`
+matches 1823 files, almost all of which carry the same dual header. The
+exceptions are only visible if you look for them:
+
+* `tests/` and `tests/cxx/` say `either version 3 of the License, or (at your
+  option) any later version` (228 files; `tests/misc/t-printf.c:8-10`,
+  `tests/devel/README:8-10`, `tests/devel/primes.c:8-10`);
+* `demos/calc/`, `demos/factorize.c`, `demos/isprime.c` and `demos/primes.c`
+  say the same (`demos/calc/calc.y:8-10`, `demos/calc/README:5-8`), while
+  `demos/expr/` and `demos/perl/` are dual (`demos/expr/expr.c:7-20`);
+* `doc/gmp.texi:13-23` is `GFDL-1.3-or-later` with no Invariant Sections, and
+  the prebuilt `doc/gmp.info` shipped in the archive carries the same terms;
+* `install-sh:7-25` is the X Consortium permission notice from
+  X11R5/X11R6 `install.sh`, and `ltmain.sh:8-26` is GNU Libtool 2.4.6 under
+  `GPL-2.0-or-later` with the Libtool linking exception;
+* `gmp.pc.in`, `gmpxx.pc.in`, `doc/version.texi`, `doc/stamp-vti` and
+  `demos/primes.h` carry no notice at all.
+
+**Cause.** GMP is dual licensed as a library, but the tree is a release
+directory, not a library: tests, demos, the manual, autotools output and libtool
+each carry their own terms, and some generated files carry three notices at once.
+
+**Decision.** `NOTICE.md` is an inventory with file and line anchors, one row per
+term, and it names the one previous statement that was wrong (`tests/` and
+`demos/` are `GPL-3.0-or-later`, not GPLv2 or later) rather than editing it
+silently. A missing header is recorded as a missing header, with the file that
+includes it, because a file without a notice is not thereby free of one.
+
+**Rule.** Do not reduce a release tree to the licence of its most prominent file,
+and do not write a per-file term from memory of the project. Read the header of
+the file, anchor the claim to it, and keep the automake/libtool scaffolding in
+the inventory even though no build in this package compiles it. Bound: any
+vendored release directory, which is most of them.
+
+**Verification.** not run; source-confirmed by reading the cited headers.
+
+## 33. The upstream README keeps its upstream name
+
+**Evidence.** The GMP archive ships its README as `README`, a file with no
+extension (`tar -tJf gmp-6.3.0.tar.xz`). The fork needed a README of its own, so
+the upstream bytes were preserved as `README.upstream.md`; both files have
+SHA-256 `5e9f9325fd702bc4bcda27d7a78fea88a2a09fa39b4b15ac7b9b205e0863dc7e`.
+
+**Cause.** The relocation contract for this wave requires a fork README in the
+canonical order and a separately preserved upstream README. Renaming `README`
+would have destroyed the upstream name in a repository whose whole provenance
+claim is that it is an unmodified archive import.
+
+**Decision.** Keep `README` as upstream left it and add `README.upstream.md` as
+the byte-identical copy. The gate checks that the two agree and that
+`README.md` is neither of them.
+
+**Rule.** When upstream's readme has no extension, do not rename it. Keep the
+upstream path as the archive placed it, put the preserved copy at
+`<name>.upstream.md`, and make the digests a gate condition rather than a note.
+Bound: any archive import whose primary readme is not `README.md`.
+
+**Verification.** not run; digests computed from the two files.
+
+## 34. A derivation that only works from the flake is not a package
+
+**Condition.** A `package.nix` is written for one caller: the flake that sits
+next to it, with an input set only that flake provides.
+
+**Fix.** The derivation is one uncurried function taking injected
+`{ lib, stdenv, zig, linkage ? "static" }`, imports no sibling directory, names no
+account, store path, scratch path or Node path, reads no host state and downloads
+nothing at build time. Both entry points call it through
+`pkgs.callPackage ./package.nix { zig = pkgs.zig_0_16; ... }`; the variants are
+their names, not a second convention in `package.nix`. The devenv shell declares
+them as lazy outputs, so entering the shell builds nothing.
+
+**Rule.** A `package.nix` takes its dependencies by injection and returns one
+derivation, evaluable with `callPackage` from either entry point and from a
+checkout with no flake and no sibling. It refuses a cross build platform instead
+of silently building for the wrong target. Host paths and store paths in a
+derivation are a portability bug that only shows up on another machine.
+
+**Verification.** not run; no Nix evaluation was performed by this role, so the
+derivations are `PENDING-VERIFICATION` until the driver builds them.
+
+## 35. A declared build option can be one the build file never spells out
+
+**Condition.** A packaging question: may `-Dcpu=baseline` be passed? The
+evidence used was a search of this repository's `build.zig` for `b.option(`, which
+showed three own declarations (`linkage`) plus `b.standardTargetOptions` and
+`b.systemIntegrationOption`, and from that the answer "no CPU option exists" was
+concluded.
+
+**Evidence.** A peer reading the pinned compiler's own `lib/std`
+(`std/Build.zig`): `standardTargetOptions` (`std/Build.zig:1414-1417`) is a thin
+wrapper over `standardTargetOptionsQueryOnly`, which declares `target`
+(`:1474-1477`), `cpu` (`:1478-1483`), `ofmt` (`:1484-1488`) and `dynamic-linker`
+(`:1489-1494`) on the caller's behalf. `b.option` marks an option consumed
+(`:1167-1168`) and an unconsumed option fails the build with `invalid option:
+-D{s}` (`:1647-1651`). Peer finding, `SOURCE-CONFIRMED`; a gate confirms or
+refutes it.
+
+**Cause.** The declared option set is not what a build file spells out. The
+declaration spans five lines, so even a search for the literal option name right
+after `option(` cannot match it.
+
+**Fix.** `-Dcpu=baseline` is passed, with a comment recording that it constrains
+Zig's own codegen and cannot select GMP's mpn path, which is fixed to `generic`
+with `NO_ASM` and derived from `target.result` rather than `cpu_features`.
+
+**Rule.** When a question turns on one build option's existence or spelling, read
+the pinned `std` range for the standard wrappers the build calls, and enumerate
+what they declare. Do not conclude an option does not exist from a search of the
+build file. Bound: any Zig build using `standardTargetOptions`,
+`standardOptimizeOption`, `systemIntegrationOption` or the other standard
+wrappers; the declarations themselves are the pinned 0.16.0 std's.
+
+## 36. A C undefined-behaviour check can be reached by a function table the code never calls by name
+
+**Condition.** GMP's own `printf` dispatch. `gmp-impl.h:4540-4543` declares the
+four slots of `struct doprnt_funs_t` as `int (*)(void *, ...)` — a `void *`
+first parameter — and each of the five initializers fills a slot by casting a
+function whose first parameter is a concrete struct pointer:
+`printf/snprntffuns.c:152-158`, `printf/sprintffuns.c:89-94`,
+`printf/vasprintf.c:103-108`, `printf/printffuns.c:75-79` (line 76 casts
+libc's own `vfprintf`) and `printf/obprntffuns.c:65-69`. Converting between
+those function pointer types is undefined behaviour in C, and it is upstream
+code this fork carries byte-for-byte.
+
+**Symptom.** Under Zig 0.16 with clang's default C instrumentation, a
+`ReleaseSafe`, `ReleaseFast` or `ReleaseSmall` build carries clang's `function`
+member of undefined-behaviour detection, which writes an eight-byte
+`0xc105cafe` signature plus a hash of the function type in front of every
+function entry and verifies it at every indirect call. The first indirect call
+through the table — `DOPRNT_FORMAT (last_fmt, last_ap)` at
+`printf/doprnt.c:612` — traps with `SIGILL` before a character is formatted. A
+`Debug` build writes no such signature and never reaches it, which is why the
+failure looks mode-specific rather than caused by the code. Nothing in the C
+source points at the fault: the cast is the only thing the check can see, and
+the call that trips on it is ordinary upstream formatting.
+
+**Cause.** Not a bug in this fork and not a Zig defect. `Module.sanitize_c` is
+null, which emits no `-fsanitize-c` flag
+(`std/Build/Module.zig:558-562`), so the compiler's own default stands and
+instruments GMP's C. Upstream's function-type pun in the `printf` table cannot
+satisfy that instrumentation, and `AGENTS.md` §4 forbids both editing the
+upstream source and suppressing a diagnostic other than through an authorised
+bounded fix.
+
+**Fix.** The flag and nothing else. `build.zig:635-638` builds
+`c_source_flags` with `-fno-sanitize=function` in every mode but `Debug`, and
+that one list is passed to all three `addCSourceFiles` calls on
+`library.root_module`: `sources.all`, the two generated tables and the
+generated `mpn` template wrappers. Every other C check, every Zig safety check
+and the optimize mode are untouched.
+
+**Rule.** When a C check fires inside an upstream function-pointer table, scope
+the exception to the flag and to the translation units that carry the table,
+and enumerate the sites it must not reach. Here that means the host table
+generators (`generatorProgram`, `build.zig:935-953`) keep the check: they are
+build-time programs for `b.graph.host` that never enter the artifact, none of
+the seven converts a function pointer, and neither does the `bootstrap.c` they
+include. `runtime/sync.c` (`runtime/graph.zig:371-375`) and
+`zig/test/alloc_probe.c` (`addTests`, `build.zig:1034-1055`) are fork-authored
+and declare no function pointer either. Giving the flag to those three would be
+disabling a check that has nothing to catch, which is the shape this fork's
+own rules forbid.
+
+**Targets bound.** Any Zig build of GMP's native C where clang's default C
+instrumentation applies, that is every optimize mode but `Debug`, on every
+target. The flag is a property of the command line, not of an architecture, so
+no cross-target gate changes. Consumers are not affected: the flag touches no
+header text, no `gmp.pc` content, no `__GMP_LIBGMP_DLL` value, no exported
+symbol and no ABI. What *is* affected is any other graph that compiles the same
+GMP `printf` sources without the flag — in this workspace that is
+`mpfr/vendor/gmp`, which carries the identical cast sites at the identical line
+numbers and compiles them with `flags = &.{"-D__GMP_WITHIN_GMP"}` only
+(`mpfr/vendor/gmp/build.zig:305-323`), under an `optimize ? "ReleaseSafe"`
+default (`mpfr/package.nix:11`). `SOURCE-CONFIRMED` from those files; not
+observed from an MPFR run, and the sibling was not edited here.
+
+## 37. A translation the C compiler also sees can declare names no library exports
+
+**Condition.** The runtime route. `include/gmp_all.h` includes `<stdio.h>` and,
+where the target has it, `<obstack.h>` — which pulls `<string.h>` in behind it —
+so the same translation that carries GMP's declarations also carries the C
+library's. `runtime/generate.zig` sorts every `extern` into routed, optional or
+direct, and the only thing that makes a declaration direct is its name being in
+`runtime/graph.zig`'s `libc_noise`. A name that is not in that list is assumed
+to be GMP's.
+
+**Symptom.** `-Druntime=true -Doptimize=ReleaseSafe` only: `error:
+MissingSymbol` from the example, and every test either failing on that error
+or panicking with `mpz_init was called before this module was loaded`. Debug,
+ReleaseFast, ReleaseSmall and all eight native gates passed with the same
+provider.
+
+**Cause.** The pinned translator defines `_FORTIFY_SOURCE` at `-O2`, which is
+what `-Doptimize=ReleaseSafe` becomes, and glibc's `<stdio.h>` and `<string.h>`
+then declare twenty helpers. Twelve are `libc.so.6` exports. The other eight —
+the five `__*_alias` and three `__*_chk_warn` names — are not symbols at all:
+glibc declares each through `__REDIRECT`, whose `__asm__` label names the
+unfortified function (`bits/stdio2-decl.h:96` gives `__fgets_alias` the label
+`fgets`), and the translator keeps the declaration name while dropping the
+label.
+`dlsym` on the provider's handle searches the provider's dependencies, so
+the twelve libc names resolved by accident, through `libc.so.6`; the eight
+cannot resolve for any provider, and the first of them in table order is
+`__fgets_alias`. Nothing about the provider was wrong and nothing about the
+header was wrong: the required table was asking the wrong question.
+
+**Rule.** A C library declaration that reaches a binding's translation is the C
+library's, whatever optimization the translator ran at, and it must be direct
+in every mode rather than resolved at load time. The evidence for which names
+those are is per configuration, not per library: this one appeared only at
+`-O2`. So `libc_noise` is re-measured whenever the translation changes, and a
+name is added there — never to `provider_optional`, whose absence would stop the
+program by name at the call site instead of refusing the provider at load time,
+and never to `provider_excluded`, whose absence would be silently accepted.
+Making the generator route only names beginning with `__gmp` was rejected: it
+would turn a measurable list into a prefix guess and could drop a real GMP
+symbol on a target whose header spells one differently.
+
+**Targets bound.** Any glibc target whose translation runs at `-O2`. The
+linked configuration is unaffected and always was: it keeps these declarations
+direct out of the same translation, which is what makes this a routing defect
+and not an ABI one. `SOURCE-CONFIRMED` from the generated dispatches, the
+translated sources and the provider's dynamic symbol table; not observed from a
+re-run, and none was made.
+
+## 38. A linked configuration owes the facade the loader core, and an unhonourable request is refused
+
+**Condition.** The build graph's own configuration handling. `root.zig` names
+the loader core at container scope — `const rt = @import("rt")`, from where a
+linked build's `LoadSource` and `LoadError` come — and a container-scope
+import is only analyzed when something references it. That hides a missing
+module import until a consumer names the type behind it, which is the worst
+moment: the mode builds, and the failure lands on a caller that did nothing
+wrong.
+
+**Two failures with that shape, both in `-fsys=gmp`.** The mode added `c` and
+no `rt`, so it could not answer a consumer naming `gmp.LoadSource` or
+`gmp.LoadError`; and it accepted `-Druntime=true`, which `makeLibrary`
+forwards only to the bundled branch, dropped it, and exited 0 having linked the
+installed library. A green exit from the wrong configuration is worse than a
+refusal: it is evidence that cannot be checked later because it looks like
+evidence.
+
+**Rule.** Two obligations, both from the same place. A configuration that
+links GMP — the bundled one and the system one alike — supplies the loader
+core, because the facade's public types come from it in both and there is
+exactly one of each in a build. And a request the build cannot honour is
+refused at configure time, by name, with both options in the message; it is
+never substituted with the nearest configuration that can be built. Refusing
+`-fsys=gmp -Druntime=true` is the second rule, not a missing feature: making
+system mode a third runtime-loading route would mean generating a dispatch from
+the installed header and deciding where that library is loaded from, which is
+new behaviour with its own ABI statement and its own gates.
+
+**Targets bound.** Both loaded linkage routes are unaffected:
+`-Druntime=true -Dlinkage=static` and `-Druntime=true -Dlinkage=dynamic` still
+reach the bundled branch with the option forwarded. No ABI, no exported symbol
+and no `gmp.pc` content changes in any configuration.
+`SOURCE-CONFIRMED` from `build.zig`, `root.zig` and `runtime/graph.zig` as
+written; not observed from a run, and none was made.
+
+## 39. A published surface is per configuration, and a dependent reads the shared answer
+
+**Condition.** The consumer package, which is this tree's own example of a
+dependent. It linked `dep.artifact("gmp")` whenever `-Druntime` was not set and
+pinned `linkage` to `static` and `runtime` to `false` on the way in. Run as
+`cd gmp/consumer && zig build run -fsys=gmp -Dlinkage=dynamic`, it exited 1
+with `unable to find artifact 'gmp'`, listing `gmp-example` as the only one
+available — which is the signature of the system branch having been taken
+correctly and the artifact then being asked for in the one configuration that
+does not publish it.
+
+**Three obligations, all about the same seam.** A package publishes what a
+configuration produces: system-library mode compiles nothing, so it publishes
+the module and no artifact, and a dependent that links the artifact there gets
+a panic rather than a link — the honest failure, and one that never was
+avoidable by guessing. A dependent reads the configuration rather than
+forwarding it, because the toolchain already resolved it once into a build
+graph every package in the process shares. And a dependent forwards an option
+as it was given or not at all, because a default it invented arrives at the
+dependency as a request the user never made, and a wrong one of those is
+invisible: `-Dlinkage` means "which installed library to prefer" in system mode,
+where the SDK's own default is dynamic, so a pinned `static` turns a normal
+host into a link failure that reads as a broken system library.
+
+**Rule.** Never invent a second spelling for a setting the toolchain resolves
+(`-Dfsys` would be one, and would be a second thing to disagree about); read
+it with the same call the package it names uses. Never forward a default of
+your own as though the user had asked for it — leave it null and let the
+dependency apply its own. And keep a union's payload and its unreachable arms
+honest: `Library` described a `system` link path that no call could reach, and
+that dead arm reads as a second mechanism to anyone reasoning about which link
+carries the installed library.
+
+**Targets bound.** The bundled configurations are unchanged. `-Dlinkage=static`
+and `-Dlinkage=dynamic` still compile the artifact the dependent links, a plain
+`zig build run` is still the linked static consumer it was, and
+`-Druntime=true` still links no archive. No ABI, exported symbol or `gmp.pc`
+content changes in any configuration. `SOURCE-CONFIRMED` from
+`consumer/build.zig`, `build.zig` and the toolchain sources named in
+`CHANGELOG.md` entry 22, read as written; not observed from a run, and none was
+made.
+
+## 40. A translation the preprocessor has to survive is not a header problem
+
+**Condition.** The aggregate translation unit. `include/gmp_all.h` exists so
+that translation has one entry point, and the first two includes it makes are
+`<stdarg.h>` and `<stdio.h>` — without them `gmp.h` declines to declare the
+whole printf and scanf family and the translation silently loses it
+(`include/gmp_all.h:18-26`). That is the right trade for a header a C consumer
+compiles, where `stdio.h` is already in. It also means the translation can only
+ever be as good as the front end's reading of the *target's own* libc.
+
+**Fourteen targets said it was not good enough.** Nine NetBSD targets, three
+OpenBSD targets and two OpenBSD mips64 targets failed in `addTranslateC` while
+their libgmp compiled, because that compilation is clang's and the translation
+is Aro's. Three distinct faces, one cause: Aro is not the target's preprocessor.
+NetBSD's `sys/cdefs.h:408-424` makes `__BEGIN_DECLS` a
+`_Pragma("GCC visibility push(default)")` and `__END_DECLS` the matching pop,
+and Aro's `#pragma GCC` handler knows only `error`, `warning`, `diagnostic` and
+`poison`. On 32-bit OpenBSD, Aro's `size` is an `unsigned int` where the
+platform's is an `unsigned long`. On OpenBSD mips64, `machine/endian.h`
+hard-`#error`s without `__MIPSEL__` or `__MIPSEB__` and Aro's MIPS branch
+defines neither. `CHANGELOG.md` entry 23 carries the line references.
+
+**Rule.** When the front end cannot read the target's own headers, the target's
+own front end reads them first, and it is the compiler already pinned to the
+build — never a second preprocessor, a hand-written substitute or a narrowed
+aggregate. The condition is a family (the OS tag), never a list of triples,
+because a list stops covering the next architecture silently and the family is
+what shares the cause. Everything the front end would have seen is still there:
+every `#include` resolved, every conditional settled, every GMP declaration and
+macro kept, which is what `-dD` is for on a header that is mostly macros. One
+macro is deliberately not kept, and it is named because it is not GMP's:
+`__ALIGNBYTES`, a NetBSD-internal macro that arrived with the platform's own
+headers and that no GMP source or declaration uses. It is not part of GMP's
+surface, and it is removed only after every include has resolved, which is the
+point at which it has demonstrably cost nothing. And the step has to know
+what it read: a `-I` directory argument contributes one resolved path and a step
+dependency and nothing about what is inside the directory, so without the
+depfile and the generated header named as a dependency in its own right the run
+cache will happily serve a translation that describes a header since changed.
+
+**Not a licence to trim.** Filtering the aggregate to what translates is the
+one repair that would have worked everywhere and lost the API with it. The
+route is chosen, never the contents.
+
+**Targets bound.** Every other OS family keeps Aro. `-fsys=gmp` still reads the
+installed header, both linkage modes and the runtime-loaded dispatch are
+untouched, and no ABI, exported symbol or `gmp.pc` content changes in any
+configuration. Hexagon still fails where it failed, in `zig/config_gen.zig`'s
+pointer-width table and before this step: recorded, not repaired here.
+`SOURCE-CONFIRMED` from `build.zig`, the Zig 0.16.0 libc headers and the Aro
+sources named in `CHANGELOG.md` entry 23, read as written; not observed from a
+run, and none was made.
+
+---
+
+## 41. An installed record is a record of the install, not of the writer
+
+**Condition.** Licence material has to reach whoever receives the library. The
+four upstream grants are upstream's own files, and `NOTICE.md`,
+`FORK-LICENSE.md`, `UPSTREAM.md` and `README.upstream.md` are this fork's, and
+both sets are terms of one redistribution: the grant a recipient must be able
+to read about a `libgmp` built from these sources covers the sources, not only
+the ones that came out of the archive.
+
+**Two owners was the defect.** `addInstalledRecords` installed `licence_files`
+and `metadata_files`, and `package.nix:78-81` wrote the other four with
+`install -Dm644` after the build had returned. A Nix package was therefore
+complete and a `zig build install` prefix was not: the same library, delivered
+two ways, with this fork's grant and provenance present in one and missing from
+the other. The native prefix is the one a `dep.artifact("gmp")` consumer, a
+distributor and a downstream packager reach first, so it is the one where a
+missing `FORK-LICENSE.md` is least likely to be noticed and most expensive.
+
+**Fix.** The build graph owns every installed record. `fork_record_files` sits
+beside `licence_files` and `metadata_files` and installs through the same loop
+and the same `share/licenses/gmp` destination expression, so the records cannot
+be routed away from the grants or given a mode of their own; `package.nix` keeps
+one `zig build install` and writes no path; the provenance gate names all eight
+against that one owner instead of checking half of the set in each of two files.
+Nothing is duplicated into the derivation and nothing is dropped from the
+build.
+
+**Rule.** Decide who owns an installed file by what the file is, not by which
+tool happens to run last. A record that exists only in the packaging layer is
+invisible to every delivery path that does not go through that packaging, and a
+redistribution obligation is not discharged on one of several routes.
+Documenting a split in three files and checking half of it in two does not make
+it safe: it makes it read as a decision, which is what the three documents said
+about this one.
+
+**Targets bound.** No ABI, exported symbol, header or `gmp.pc` content changes
+in any configuration, both linkage modes are untouched, `-fsys=gmp` builds no
+artifact and installs nothing as before, and the four upstream grant texts still
+install from the same call to the same paths with the same defaults.
+`SOURCE-CONFIRMED` from `build.zig`, `package.nix` and `tools/provenance_gate.sh`
+read as written; not observed from a run, and none was made by this change.
+
+## 42. A published recipe is not the package's rule until it says the same condition
+
+**Condition.** A document that shows a configuration-dependent step. Three
+published statements here described a condition the working code beside them
+already answered differently.
+
+**Symptom.** `README.zig.md`'s quick start guarded `dep.artifact("gmp")` on
+`-fsys=gmp` alone, so a dependent that copied it and built `-Druntime=true`
+linked `libgmp` into a graph whose calls go through the dispatch `load` is
+meant to fill; `consumer/build.zig:135-137` and `build.zig:360-365` both refuse
+that link and both say why. `consumer/build.zig` built its run step without
+`b.args` while `consumer/src/main.zig:7-8` documents `--provider <path>` as a
+command-line input, so the flag a caller passed was dropped and the program
+fell through to `GMP_TEST_PROVIDER` and reported that it had been told nothing.
+And `runtime/library.zig` — the file `README.zig.md` names as the provider ABI
+boundary — said `mp_limb_t` is `unsigned long` on every target including LLP64
+and called a `_LONG_LONG_LIMB` provider not interchangeable, while
+`gmp-h.in:137-145` puts the typedef behind that macro and
+`zig/config_gen.zig:224-230` emits it wherever the target's `long` is under 64
+bits, so this build's own `x86_64-windows-gnu` limb is `unsigned long long int`.
+
+**Fix.** The quick start declares `runtime`, forwards it unchanged and guards on
+it as well; the consumer forwards `b.args`; `runtime/library.zig` states both
+arms and cites the upstream input and this fork's generator for the choice.
+
+**Rule.** A snippet documents the graph; it does not illustrate it. Derive a
+documented condition from the code that enforces it and keep the two in step,
+because a snippet short by one guard does not fail where the package fails — it
+fails later, in the dependent, in exactly the configuration the guard was about.
+A provider-ABI document has to state what the *generated* header says for the
+target, which on this fork is two arms and not one.
+
+**Targets bound.** No API, no cast, no linkage default, no generated header and
+no native byte changes: the quick start is prose, `b.args` reaches only the run
+step of this tree's own consumer, and the limb typedef is read from `gmp-h.in`
+and `zig/config_gen.zig`, both untouched. `SOURCE-CONFIRMED` from the files as
+written; not observed from a run.
+
+## 43. A prefix under `$PWD` is still inside the checkout, and so is the default
+
+**Condition.** A CI step that installs and does not name `--prefix`. Zig's
+default prefix is `<package root>/zig-out`, which inside a checkout is the SDK
+tree itself.
+
+**Symptom.** `.github/workflows/ci.yml` had three installing steps at that
+default — `verify`'s build, `shared`'s shared install and `runtime`'s
+`-Druntime=true` install — and one step already naming a prefix of its own,
+`runtime`'s provider. That prefix was `$PWD/zig-out-provider`, which is
+*inside* the checkout like the default: the convention reached one step of one
+job, and where it did reach it the tree was still left dirty.
+
+**Fix.** Every prefix in the workflow is under `$RUNNER_TEMP`, the runner's own
+scratch root and outside `$GITHUB_WORKSPACE`: `$RUNNER_TEMP/gmp-install` for
+the three installing steps, `$RUNNER_TEMP/gmp-provider` for the provider build
+and for the `GMP_TEST_PROVIDER` path read back from it. The two are separate
+roots, so nothing a later install step writes can disturb the provider. Steps
+that install nothing — `test`, `smoke`, `check`, `cross` — are unchanged, as is
+the consumer package's own artifact, which `devenv.nix` already gives a prefix
+of its own (CHANGELOG entry 25).
+
+**Rule.** A prefix is only external if it is *outside* the checkout: naming
+`$PWD/<name>` moves where the install lands without moving it out of the tree,
+and nothing in the file lets a reader tell those two apart. Redirect every step
+that reaches `b.getInstallStep()`, not only the one whose name says install — a
+plain `zig build` installs — and move the prefixes that were already explicit
+in the same change, or the file keeps one convention that does not hold. Follow
+the rest of the step graph too: `smoke` and the consumer run both hang off an
+install step (`build.zig:238`, `consumer/build.zig:143`), so a moved prefix
+moves with them, and an installed program still finds its library relatively
+(`$ORIGIN/../lib`, `installedProgramRPath`).
+
+**Targets bound.** CI metadata only. No build graph, option, flag, target or
+install destination inside the package changed, and no step, trigger, matrix
+cell or job was added, removed or reordered — only the prefix each installing
+step names, and the `GMP_TEST_PROVIDER` path derived from the same build.
+`SOURCE-CONFIRMED` from the workflow as written.
+**No CI run exists**: this repository is local and unpublished, so every line
+here is unexecuted.
+
+## 44. A public spelling that is a macro chain is two promises, and one of them was empty
+
+**Condition.** The low-level layer, where GMP's own public spelling is a macro
+and not a declaration. `gmp-h.in:249-251` defines `__MPN(x)` as `__gmpn_##x`,
+and `gmp-h.in:1470-1700` writes that family as object-like
+`#define mpn_<name> __MPN(<name>)` above each declaration — `mpn_add` at
+`:1470`, `mpn_add_1` at `:1475`, `mpn_cmp` at `:1486`, `mpn_sub_1` at `:1615`.
+Each `mpn_*` name and the `__gmpn_*` symbol it renames are therefore one
+function, and the raw route has to offer both spellings of it.
+
+**Symptom, observed by the parent.** From `gmp/`,
+`zig build test -Dtarget=x86_64-linux -Druntime=false -j8 --summary all`
+(with the cache, global-cache and `--prefix` arguments recorded in the
+receipt) exited 1 after 7.87s with 20 of 23 steps done — receipt
+`artifact://19872`, parent background id 1164. The native `libgmp` archive step
+and the translate-c step both succeeded, in 2s and 50ms, so neither the C build
+nor translation-as-a-step was what failed. Two regression tests in the
+translated module did: `gmp.c.mpn_add_1` reached an undefined `add_1`
+(`zig/test/known_answers.zig:366`) and `gmp.c.mpn_cmp` an undefined `cmp`
+(`:423`). `mpn_sub_1` is called the same way at `:389` and `:401` and is the
+same family; it is named here as surface read out of source, not as a third
+observed failure.
+
+**Why that is a contract failure and not a test detail.** The raw route is
+published as complete — `README.zig.md:243-248`, `root.zig:8-10` and
+`root.zig:127` — and `zig/example/main.zig:171/174-180` drives `mpn_*` by name.
+The `__gmpn_*` spelling reached the exported symbol; the `mpn_*` spelling, the
+one GMP's own header hands a C caller, did not.
+
+**Repair, as landed in source.** In the private aggregate only, 77 object-like
+`mpn_*` aliases are each individually guarded and each mapped straight to its
+own `__gmpn_*` symbol, so a routine the target's headers do not declare is not
+given one. The three function-like macros — `mpn_divexact_by3`
+(`gmp-h.in:1499`), `mpn_divmod_1` (`:1505`) and `mpn_divmod` (`:2302`, in the
+GMP 2 source-compatibility block and outside the alias run) — are untouched, as
+are the upstream inputs: `gmp-h.in`, the C sources of `libgmp` and the
+generated `gmp.h` are not edited, so no symbol or ABI moves. No GMP
+declaration, macro or spelling is dropped. The 77 is confirmed on both sides:
+`gmp-h.in:1470-1700` holds 77 object-like `#define mpn_<name> __MPN(<name>)`
+lines — 76 written with one space, `mpn_cnd_swap` at `:1668` with two — and
+`include/gmp_all.h` holds 77 individually guarded `#undef` / `#define mpn_<name>
+__gmpn_<name>` pairs whose names track that list in the same order. The header edit
+belongs to the runtime/translation change, and its layout is final: lines 1-64
+are the original aggregate ending in `#include <gmp.h>`, 66-73 the rationale,
+74-381 the 77 guarded entries, 383-385 the NetBSD rationale, and 386-388 the
+`#if defined(__NetBSD__)` / `#undef __ALIGNBYTES` / `#endif` pair.
+
+The NetBSD-only `#undef` of `__ALIGNBYTES` is a separate change with a separate
+cause and its own pending result: on AAPCS64, NetBSD defines it as the implicit
+compiler typedef `__int128_t`, which is a platform-internal macro that no GMP
+source or declaration uses (`include/gmp_all.h:383-385`). It is removed only
+under `#if defined(__NetBSD__)` and only after every include has resolved, so it
+costs no GMP name. Nothing in this note's condition or observation covers it,
+and nothing in it licenses dropping a GMP name.
+
+**Rule.** Where a library publishes a public name as a macro that renames a
+function, "the raw API is complete" reads as *every* published spelling
+resolves to a symbol that exists, not as the underlying declaration being
+present. A translation step reported as succeeding proves the step ran; it does
+not prove the name it emitted refers to anything. Reach, in a test, the name a
+consumer actually calls — not only the name the library exports.
+
+**Targets bound.** No native C byte, no upstream header, no generated input, no
+ABI typedef, no linkage default and no `build.zig` line changes; note 40's
+preprocessing record is otherwise unchanged. **The AFTER gate has now run**, by
+the parent and not by this change: background 1174 for this SDK's own suite,
+1181 for the linked static dependent and 1182 for the loaded static one. Both
+spellings reaching one symbol is observed for those two cases; note 45 carries
+the receipts and states the boundary.
+
+## 45. An alias fix is proved by the matrix that runs it, and bounded by the routes that were not run
+
+**Condition.** A private-aggregate change whose whole point is that a name
+reaches a symbol. Nothing inside this tree can establish that, because every
+consumer here is built by the same graph that made the change.
+
+**What was observed, by the parent.** Five runs, none of them mine.
+
+* Background 1174 — this SDK's own test run on `x86_64-linux`: 23 of 23 steps,
+  49 of 49 tests, exit 0, 5.61s.
+* Background 1178 — all eight configurations, static and dynamic crossed with
+  Debug, ReleaseSafe, ReleaseFast and ReleaseSmall; `test`, `smoke` and
+  `install` pass in every one, 49 of 49 each.
+* Background 1185 — the 53-cell cross matrix, receipt
+  `20261004T224549506489Z-25324/gmp-53-target-8.json`: 8 of 8 jobs completed,
+  `source_stamp_before == source_stamp_after` (`8046351d…`). Raw
+  `pass=19 fail=1 build_only=27 partial=6`; corrected `pass 19 / build_only 33 /
+  build_fail 1`. Nineteen cells ran on a real target and passed 49 of 49 each;
+  thirty-three are build-only, six of them `reason: partial_execution`, which is
+  what the correction from the earlier pass-scored attempt withdraws. The one
+  build failure is `hexagon-linux`. Both NetBSD targets compiled and **neither was
+  executed** (`run=unavailable` and `run=partial`), and no native header changed.
+* Background 1181 — the scratch dependent `gmp-alias-proof`, linked static: 3 of
+  3 known-answer checks, 23 of 23 steps.
+* Background 1182 — the same dependent, loaded static: 3 of 3, against a real
+  `GMP_TEST_PROVIDER` naming `gmp-shared/lib/libgmp.so.10.5.0` and the
+  runtime-generated dispatch rather than a linked library.
+
+**The dependent's own first failure is part of the record.** It failed before
+it reached GMP, on an absolute path in its scratch `build.zig.zon`, which the
+parent corrected to a relative path confined to scratch. Keeping it here is the
+point: a green run whose predecessor failed on packaging is not a clean first
+attempt, and a record that showed only the green one would overstate it.
+
+**Compiled inputs did not change during verification.** The source digests taken
+before and after the eight-mode run are identical at `764eb8e0b9d7b83b` across
+all 6070 compiled files, so what the compiler consumed did not move while the
+verification ran. It is not a statement about the import baseline — every upstream
+byte rests on the protected `UPSTREAM.sha256` record and
+`tools/provenance_gate.sh`, a source assertion until the full SHA-256 and licence
+gate — and nothing about a consumer's ELF layout or its data ABI is inferred from
+it. Receipts are `run.json` and `prefix-map.json` under
+`/home/tmp2/gertullj/scratch/foundation-libs/native-final-evidence/gmp-alias-native-final-after-20261004/`.
+
+**Rule.** Prove a translation or linkage repair from the matrix that actually
+runs it, and add a dependent for the route the matrix cannot cover — here the
+private aggregate, which no in-tree consumer reaches the way an outside package
+does. Then bound the claim in both directions: do not narrow what the matrix has
+already earned, and do not widen what the dependent has not. Name the two states
+a digest compares before quoting it: "unchanged during verification" and
+"unchanged since the import" are different claims, and only the second one is
+about byte preservation.
+
+**Targets bound, and what the evidence does not reach.** The private aggregate and
+the carry/borrow/compare behind it are exercised across the whole SDK matrix: all
+four optimize modes crossed with static and dynamic, 49 of 49 each. The
+independent dependent is narrower and is stated at its real width — Debug,
+static, two routes, three known-answer checks. Nothing here claims dynamic
+linkage for the dependent or the other three optimize modes for it. The
+system-library configuration is observed separately, in this SDK's own case:
+background 1239 built against an own installed GMP — GNU, Debug, dynamic consumer
+— compiled and executed it with the checkout unchanged, receipt
+`nested-delivery-proof/evidence/20261004T235856750722Z-fed3d94ed7d6/index.json`.
+That is this package's own installed-GMP case and not an independent external
+provider result; the two are never merged into a single claim. NetBSD is not
+open as a build: both NetBSD targets compile in the ordinary SDK matrix and in the
+53-cell run, and neither has been executed there.
+The strict preservation comparator over the saved header has since run:
+background 1238 verified both NetBSD namespaces, 77 of 77 aliases
+and native functions, and full translated and preprocessed C payload preservation —
+receipt `comparison-20261004T235215309787Z-38840`. One bound travels with it: the data
+aliases `mp_bits_per_limb` and `gmp_version` fail container-const initialization
+before and after on both targets, observed, with control evidence
+`20261005T001849274984Z-70688` retaining the before state at four mixed ALIGN and
+initializer errors and the after state at four clean initializer controls. No
+data-alias usability or isolation PASS is claimed.

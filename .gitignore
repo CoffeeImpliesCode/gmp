@@ -20,7 +20,11 @@ libtool
 *.lo
 *.la
 *.so
+*.so.*
 *.a
+*.dll
+*.dylib
+*.dll.a
 
 # GMP's own generated tables, produced by the Zig build in its cache directory.
 fib_table.h
@@ -32,3 +36,16 @@ perfsqr.h
 jacobitab.h
 fib_table.c
 mp_bases.c
+
+# Local state from the Nix development environment. None of it is an input to
+# the package; the committed inputs are `devenv.nix`, `devenv.yaml` and
+# `.envrc`.
+.devenv/
+.devenv.flake.nix
+devenv.local.nix
+.direnv/
+
+# Nix build result symlinks a local `nix build` leaves in this checkout. The
+# build itself happens in the store; these are only the `result*` links.
+/result
+/result-*

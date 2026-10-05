@@ -2,12 +2,16 @@
 //!
 //! The accepted inputs and the failure modes are GMP's, not this package's:
 //! `mpz_set_str` accepts an optional sign, digits in the requested base, and
-//! with base 0 it also honours the `0x`, `0X`, `0b` and `0` prefixes. Anything
-//! else, including embedded whitespace, underscores and a trailing garbage
-//! character, is rejected.
+//! with base 0 it also honours the `0x`, `0X`, `0b` and `0` prefixes. White
+//! space is *not* rejected: GMP skips it before the sign and among the leading
+//! zeros (`mpz/set_str.c:65-68`, `:102-104`) and drops every white space
+//! character from the body (`:118-131`), so `" 12 "`, `"1 2"` and `"12"` are
+//! the same number. An underscore and trailing garbage are rejected, because
+//! `_` is neither a digit nor white space and `abc` is not a digit in base 10.
 
 const std = @import("std");
 const gmp = @import("gmp");
+const bootstrap = @import("bootstrap.zig");
 
 const expectEqualStrings = std.testing.expectEqualStrings;
 const expectError = std.testing.expectError;
@@ -15,6 +19,7 @@ const expectEqual = std.testing.expectEqual;
 const expect = std.testing.expect;
 
 test "decimal parsing accepts a minus sign and leading zeros" {
+    try bootstrap.ensureLoaded();
     const cases = [_]struct { text: [:0]const u8, decimal: []const u8 }{
         .{ .text = "0", .decimal = "0" },
         .{ .text = "42", .decimal = "42" },
@@ -32,6 +37,7 @@ test "decimal parsing accepts a minus sign and leading zeros" {
 }
 
 test "base 0 auto detection follows GMP prefixes" {
+    try bootstrap.ensureLoaded();
     const cases = [_]struct { text: [:0]const u8, value: c_ulong }{
         .{ .text = "0x1f", .value = 31 },
         .{ .text = "0X1F", .value = 31 },
@@ -48,6 +54,7 @@ test "base 0 auto detection follows GMP prefixes" {
 }
 
 test "explicit bases from 2 to 62" {
+    try bootstrap.ensureLoaded();
     var buf: [32]u8 = undefined;
 
     var binary = try gmp.BigInt.parse("11111111", 2);
@@ -69,6 +76,7 @@ test "explicit bases from 2 to 62" {
 }
 
 test "invalid input is rejected" {
+    try bootstrap.ensureLoaded();
     // Digits that do not belong to the base.
     try expectError(error.InvalidDigit, gmp.BigInt.parse("12a", 10));
     try expectError(error.InvalidDigit, gmp.BigInt.parse("0b12", 2));
@@ -106,6 +114,7 @@ test "invalid input is rejected" {
 }
 
 test "a bare radix prefix with no digits is zero, not an error" {
+    try bootstrap.ensureLoaded();
     // `mpz_set_str` consumes `0x`, sets base 16, and lands on the terminator
     // (`mpz/set_str.c:85-99`). The empty-body case that follows stores zero and
     // reports success (`:105-110`), so this is a defined result rather than a
@@ -116,6 +125,7 @@ test "a bare radix prefix with no digits is zero, not an error" {
 }
 
 test "out of range bases are rejected before reaching GMP" {
+    try bootstrap.ensureLoaded();
     // GMP only documents bases 0 and 2..62; anything else is rejected here
     // instead of being undefined behaviour inside `mpz_set_str`.
     try expectError(error.InvalidBase, gmp.BigInt.parse("1", 1));
@@ -124,6 +134,7 @@ test "out of range bases are rejected before reaching GMP" {
 }
 
 test "base 2 through 62 are accepted" {
+    try bootstrap.ensureLoaded();
     var base: u8 = 2;
     while (base <= 62) : (base += 1) {
         var value = try gmp.BigInt.parse("1", base);
@@ -133,6 +144,7 @@ test "base 2 through 62 are accepted" {
 }
 
 test "setStr reports failure and leaves the value unspecified" {
+    try bootstrap.ensureLoaded();
     var value = gmp.BigInt.init();
     defer value.deinit();
     value.setUnsignedWord(1234);
@@ -147,6 +159,7 @@ test "setStr reports failure and leaves the value unspecified" {
 }
 
 test "the published capacity bound is the manual's bound, no more" {
+    try bootstrap.ensureLoaded();
     // `-7` is one digit with a sign, so `mpz_sizeinbase + 2` is three bytes,
     // and three bytes are exactly what "-7" and its NUL occupy.
     var small_value = try gmp.BigInt.parse("-7", 10);
@@ -181,6 +194,7 @@ test "the published capacity bound is the manual's bound, no more" {
 }
 
 test "rendering needs a real base, parsing may guess one" {
+    try bootstrap.ensureLoaded();
     var value = try gmp.BigInt.parse("255", 10);
     defer value.deinit();
     var buffer: [8]u8 = undefined;
@@ -200,6 +214,7 @@ test "rendering needs a real base, parsing may guess one" {
 }
 
 test "formatting round trips through every base" {
+    try bootstrap.ensureLoaded();
     var value = gmp.BigInt.init();
     defer value.deinit();
     value.setUnsignedWord(1);

@@ -2,6 +2,11 @@
 //!
 //! The results are fixed mathematical facts, so the output is deterministic and
 //! a wrong answer fails the run instead of printing silently.
+//!
+//! It works in both of the package's configurations. In a runtime-loading one
+//! the provider is named on the command line (`--provider <path>`) or in
+//! `GMP_TEST_PROVIDER`, and nothing else is tried; in a linked one the library
+//! is already there and neither input is read.
 
 const std = @import("std");
 const gmp = @import("gmp");
@@ -16,12 +21,26 @@ fn report(label: []const u8, text: []const u8, expected: []const u8) Mismatch!vo
     }
 }
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     var buffer: [256]u8 = undefined;
 
-    std.debug.print("consumer: GMP {s}, {d}-bit limbs\n", .{
+    // The one explicit step a runtime-loading build needs, and a no-op in a
+    // linked one. No default path is searched and no fallback exists.
+    if (comptime gmp.runtime_loaded) {
+        try gmp.load(.{ .path = try gmp.providerRequest(init) });
+    }
+
+    std.debug.print("consumer: GMP {s}, {d}-bit limbs, {s} build\n", .{
         gmp.upstream_version,
         gmp.limb_bits,
+        if (gmp.runtime_loaded) "runtime-loaded" else "linked",
+    });
+
+    // What the loaded library says about itself, read from its own data rather
+    // than from this program's idea of it.
+    std.debug.print("consumer: provider {s} ({d} bits per limb)\n", .{
+        gmp.providerVersion(),
+        gmp.providerBitsPerLimb().*,
     });
 
     // Facade: owned integers, exact arithmetic and formatting into caller
@@ -77,6 +96,27 @@ pub fn main() !void {
         _ = gmp.c.mpz_out_str(scratch_file, 10, value.rawSrcPtr());
         _ = gmp.c.fclose(scratch_file);
     }
+
+    // A buffer GMP itself allocated, released through the package's own free
+    // helper. `mpz_get_str` with a null buffer returns memory from GMP's own
+    // allocator, and the free function that gives it back is the one GMP has
+    // installed *now*, read through `__gmp_get_memory_functions`. In a
+    // runtime-loading build both of those are the provider's, so this is a
+    // complete round trip through the same library rather than a mixture.
+    const raw_text = gmp.c.mpz_get_str(null, 10, value.rawSrcPtr());
+    if (raw_text == null) return error.ConsumerMismatch;
+    const rendered = std.mem.span(raw_text);
+    // The size is read while the block is still alive; reading it after the
+    // release would be reading freed memory.
+    const block_size = rendered.len + 1;
+    try report("native buffer", rendered, "42");
+    gmp.freeNativeBlock(raw_text, block_size);
+
+    // The same thing through the facade, which owns the block and releases it
+    // in its own `deinit`.
+    const owned = try value.toOwnedString(10);
+    defer owned.deinit();
+    try report("owned buffer", owned.slice(), "42");
 
     std.debug.print("consumer checks passed\n", .{});
 }

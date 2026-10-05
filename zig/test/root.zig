@@ -6,6 +6,7 @@
 
 const std = @import("std");
 const gmp = @import("gmp");
+const bootstrap = @import("bootstrap.zig");
 
 test {
     _ = @import("known_answers.zig");
@@ -15,6 +16,7 @@ test {
     _ = @import("rational_float_random.zig");
 }
 
-test "every public facade method is reachable and consistent" {
+test "every public facade method produces its known answer" {
+    try bootstrap.ensureLoaded();
     try gmp.api_exercise.exercise();
 }

@@ -161,14 +161,14 @@ grep -q 'README.upstream.md' FORK-LICENSE.md ||
 for f in package.nix flake.nix devenv.nix devenv.yaml .envrc; do
     check_present "$f"
 done
-grep -q 'github:NixOS/nixpkgs/c7def046b9a883d46974757852106483d741586f' flake.nix ||
+grep -q 'github:NixOS/nixpkgs/02c087f3fe673c9e317f206a627cb6b910336dbe' flake.nix ||
     fail "flake.nix does not pin the agreed nixpkgs revision"
-grep -q 'github:cachix/devenv-nixpkgs/c2f38fe7f9e04d9aadd354d380f2bd40531d9737' devenv.yaml ||
+grep -q 'github:cachix/devenv-nixpkgs/760b85220489f69855e6df78a6d1dad5873f8bf6' devenv.yaml ||
     fail "devenv.yaml does not pin the agreed devenv nixpkgs revision"
 # Both entry points inject the same pinned compiler into the one derivation.
-grep -q 'zig = pkgs\.zig_0_16' flake.nix ||
-    fail "flake.nix does not inject zig = pkgs.zig_0_16"
-grep -q 'zig = pkgs\.zig_0_16\|inherit.*zig' devenv.nix ||
+grep -q 'zig = pkgs\.zig_0_17' flake.nix ||
+    fail "flake.nix does not inject zig = pkgs.zig_0_17"
+grep -q 'zig = pkgs\.zig_0_17\|inherit.*zig' devenv.nix ||
     fail "devenv.nix does not inject the pinned zig into package.nix"
 grep -q 'callPackage \./package\.nix' flake.nix ||
     fail "flake.nix does not build the variants from package.nix"

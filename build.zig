@@ -584,8 +584,7 @@ fn generate(
 
 fn readPackageFile(b: *std.Build, name: []const u8) []u8 {
     b.dependOnFileContents(b.path(name));
-    const root_relative_path = if (b.root.sub_path.len == 0) name else
-        std.fs.path.join(b.allocator, &.{ b.root.sub_path, name }) catch @panic("OOM");
+    const root_relative_path = if (b.root.sub_path.len == 0) name else std.fs.path.join(b.allocator, &.{ b.root.sub_path, name }) catch @panic("OOM");
     return b.root.root_dir.handle.readFileAlloc(b.graph.io, root_relative_path, b.allocator, .limited(8 << 20)) catch |err| {
         std.debug.panic("cannot read GMP template {s}: {s}", .{ name, @errorName(err) });
     };

@@ -1,44 +1,6 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
-//! Exact C translation units that make up libgmp, mirrored from the GMP 6.3.0
-//! release tree.
-//!
-//! Every entry is a real library source file. Test programs (`tests/`), the
-//! demo programs (`demos/`), the tuning programs (`tune/`), the alternate
-//! `mini-gmp` implementation, the host table generators (`gen-*.c`), the
-//! autotools scaffolding and the per-CPU assembly directories (`mpn/x86_64`,
-//! `mpn/arm64`, ...) are deliberately excluded: this fork builds the portable
-//! C backend (`NO_ASM 1`, mpn path `generic`) of the real GMP library.
-//!
-//! Provenance of the lists:
-//!   * root:  the `libgmp_la_SOURCES` list in the GMP 6.3.0 `Makefile.am` minus
-//!     headers, plus the target abstraction layer object `@TAL_OBJECT@` that
-//!     automake links separately through `libgmp_la_DEPENDENCIES`. With
-//!     `WANT_TMP_ALLOCA` selected (`configure:24107`) that object is
-//!     `tal-reent.c`, which supplies the `__gmp_tmp_reentrant_alloc` and
-//!     `__gmp_tmp_reentrant_free` the other `TMP_ALLOC` branch needs.
-//!   * mpz/mpq/mpf/printf/scanf/rand: every `*.c` in those directories, which
-//!     matches the corresponding `*/Makefile.am` source lists exactly.
-//!   * mpn: every function `configure` selects for the `generic` path, i.e.
-//!     every `mpn/generic/*.c` that is named by `$gmp_mpn_functions` or by a
-//!     `GMP_MULFUNC_CHOICES` entry, minus the multi-function templates, which
-//!     are compiled once per operation instead (see `operations`).
-//!   * generated: `mpn/fib_table.c` and `mpn/mp_bases.c` are produced by the
-//!     host table generators `gen-fib` and `gen-bases` at build time; they do
-//!     not exist in the source tree.
-//!
-//! Three `mpn/generic` files are intentionally absent from that set, and all
-//! three are accounted for upstream rather than missed: `div_qr_1n_pi2.c` and
-//! `div_qr_1u_pi2.c` are tuning alternatives that appear nowhere in
-//! `configure.ac` (the `tune/` directory carries the selected variants), and
-//! `udiv_w_sdiv.c` is one of the `extra_functions` that only four CPU-family
-//! cases in `configure.ac:1339,1379,1691,1700` add, none of which this
-//! portable backend selects.
-//!
-//! The set is the same for `-Dlinkage=static` and `-Dlinkage=dynamic`:
-//! relocation is a code-generation flag on the module, not a different
-//! selection of sources. Its external link closure is libc alone - no
-//! translation unit here includes `<math.h>`, and every floating-point
-//! primitive GMP exposes is computed with integer arithmetic in `mpn`.
+//! C source-unit inventory for GMP's portable generic backend.
+//! Generated tables and multi-function template instances have separate entries.
 
 /// Core sources sitting in the top-level GMP directory.
 pub const root = [_][]const u8{
@@ -386,10 +348,7 @@ pub const rand = [_][]const u8{
     "rand/randsdui.c",
 };
 
-/// Portable C implementation of the low-level `mpn` layer: every file in
-/// `mpn/generic` that upstream's `configure` compiles for this configuration,
-/// and nothing else. No multi-function template is in this list, and no file
-/// that upstream leaves unbuilt for a generic path is either.
+/// Portable low-level sources selected by upstream's generic backend.
 pub const mpn_generic = [_][]const u8{
     "mpn/generic/add_1.c",
     "mpn/generic/add.c",
@@ -573,36 +532,16 @@ pub const mpn_generic = [_][]const u8{
     "mpn/generic/zero_p.c",
 };
 
-/// One operation of a multi-function `mpn/generic` template.
-///
-/// A GMP 6.3.0 template has no standalone meaning: every macro it uses comes
-/// from exactly one `OPERATION_<name>`, and it defines a different set of
-/// symbols for each. Compiled on its own it does not compile at all, which is
-/// why no template appears in `mpn_generic`.
-///
-/// Upstream reaches these objects by compiling the template once per
-/// operation with `-DOPERATION_<name>`, which `mpn/Makefile.am:33` derives
-/// from the object name. Automake finds the template through the symlink
-/// `mpn/<name>.c -> mpn/generic/<template>.c` that `configure` creates at
-/// `configure:25553`; the Zig build writes the equivalent one-line wrapper
-/// instead of a symlink, which keeps every instantiation its own
-/// translation unit and its own object file.
+/// One generated instantiation of an upstream multi-function mpn template.
+/// The build writes a wrapper translation unit for each operation.
 pub const Operation = struct {
-    /// The template in the release tree.
+    /// Source template path.
     template: []const u8,
-    /// The `OPERATION_` name, which is also the operation's mpn function name.
+    /// Operation name used to instantiate the template.
     name: []const u8,
 };
 
-/// Every operation of every multi-function template the generic mpn path
-/// uses, in the order `configure` walks `$gmp_mpn_functions`. Between them
-/// they define 20 `mpn_*` symbols from 16 translation units:
-/// `mpn_and_n`, `mpn_andn_n`, `mpn_nand_n`, `mpn_ior_n`, `mpn_iorn_n`,
-/// `mpn_nior_n`, `mpn_xor_n`, `mpn_xnor_n`, `mpn_popcount`, `mpn_hamdist`,
-/// `mpn_sec_add_1`, `mpn_sec_add_1_itch`, `mpn_sec_sub_1`,
-/// `mpn_sec_sub_1_itch`, `mpn_sec_div_qr`, `mpn_sec_div_qr_itch`,
-/// `mpn_sec_div_r`, `mpn_sec_div_r_itch`, `mpn_sec_pi1_div_qr` and
-/// `mpn_sec_pi1_div_r`.
+/// Every operation selected by upstream for the generic mpn backend.
 pub const operations = [_]Operation{
     .{ .template = "mpn/generic/popham.c", .name = "popcount" },
     .{ .template = "mpn/generic/popham.c", .name = "hamdist" },
@@ -622,10 +561,7 @@ pub const operations = [_]Operation{
     .{ .template = "mpn/generic/logops_n.c", .name = "xnor_n" },
 };
 
-/// Sources generated at build time by the host table generators; they live in
-/// the generated include directory, not in the source tree. The template
-/// wrappers of `operations` are generated into the same directory and
-/// compiled from there; `build.zig` collects their names.
+/// Sources and wrappers generated in the build directory.
 pub const generated = [_][]const u8{
     "fib_table.c",
     "mp_bases.c",

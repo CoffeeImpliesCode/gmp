@@ -19,8 +19,7 @@
         );
     in
     {
-      # Variants live here, not in package.nix, which returns one derivation.
-      # default keeps the SDK's native linkage policy: static.
+      # Expose static/shared variants; static is the default.
       packages = forAllSystems (pkgs: {
         static = pkgs.callPackage ./package.nix { zig = pkgs.zig_0_16; };
         shared = pkgs.callPackage ./package.nix {
@@ -30,7 +29,7 @@
         default = pkgs.callPackage ./package.nix { zig = pkgs.zig_0_16; };
       });
 
-      # Tools only. devenv is the canonical environment; this is for parity.
+      # Tools-only shell; package derivations remain lazy.
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
           packages = [

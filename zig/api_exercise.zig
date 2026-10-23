@@ -1,22 +1,8 @@
-//! Compile-time and run-time exercise of every public facade method.
-//!
-//! Referencing a function only proves that it is declared. This module calls
-//! every public method of `BigInt`, `Rational`, `Float` and `Rand` with valid
-//! arguments and checks a mathematical result afterwards, so:
-//!
-//!   * `zig build check` compiles this for every supported target, which forces
-//!     every facade body to be instantiated, and
-//!   * `zig build test` runs it natively, which shows the calls really work.
-//!
-//! The checks are independent known answers, the same ones the test suite
-//! uses: exact factorials, exact rational arithmetic and the digits of the
-//! square root of two.
+//! Exercise public facade methods against independent expected results.
 
 const std = @import("std");
 const c = @import("c");
 
-// `@import` of a path yields the file's namespace, so each type comes from the
-// module that declares it while the error sets come from the module itself.
 const bigint_module = @import("BigInt.zig");
 const rational_module = @import("Rational.zig");
 const float_module = @import("Float.zig");
@@ -28,8 +14,7 @@ const Float = float_module.Float;
 const Rand = rand_module.Rand;
 
 pub const Failure = error{
-    /// A public call produced a result that contradicts an independent
-    /// expectation.
+    /// A facade result differed from its independent expectation.
     UnexpectedResult,
 };
 
@@ -41,9 +26,6 @@ fn expectText(expected: []const u8, actual: []const u8) Failure!void {
     if (!std.mem.eql(u8, expected, actual)) return error.UnexpectedResult;
 }
 
-/// Assert that a fallible facade call failed, and failed for the stated
-/// reason. The boundary between an accepted and a rejected buffer is part of
-/// the public contract, so it is exercised, not merely declared.
 fn expectFailure(expected: anyerror, call: anytype) Failure!void {
     if (call) |_| {
         return error.UnexpectedResult;
@@ -52,8 +34,7 @@ fn expectFailure(expected: anyerror, call: anytype) Failure!void {
     }
 }
 
-/// Call every public facade method once and verify the results that do not
-/// depend on how GMP implements them.
+/// Exercise the public facade methods with independent expected results.
 pub fn exercise() (Failure || bigint_module.ParseError || bigint_module.FormatError || rational_module.ParseError || float_module.ParseError || float_module.FormatError || rand_module.Error)!void {
     var buffer: [512]u8 = undefined;
 
@@ -68,7 +49,6 @@ fn exerciseIntegers(buffer: []u8) (Failure || bigint_module.ParseError || bigint
     defer value.deinit();
     try expect(BigInt.parseOrNull("nonsense", 10) == null);
 
-    // Construction, parsing and copying.
     try value.setStr("ff", 16);
     try expectText("255", try value.writeTo(buffer, 10));
     var copy = value.clone();
@@ -97,7 +77,6 @@ fn exerciseIntegers(buffer: []u8) (Failure || bigint_module.ParseError || bigint
     from_double.setDouble(7.9);
     try expect(from_double.toUnsignedWord() == 7);
 
-    // Arithmetic.
     var a = BigInt.init();
     defer a.deinit();
     a.setUnsignedWord(48);
@@ -136,7 +115,6 @@ fn exerciseIntegers(buffer: []u8) (Failure || bigint_module.ParseError || bigint
     scratch.mul2Exp(3);
     try expect(scratch.toUnsignedWord() == 200);
 
-    // Division in the three rounding modes, plus exact division and modulo.
     var dividend = try BigInt.parse("-7", 10);
     defer dividend.deinit();
     var divisor = BigInt.init();
@@ -164,7 +142,6 @@ fn exerciseIntegers(buffer: []u8) (Failure || bigint_module.ParseError || bigint
     defer quotient.deinit();
     try expect(quotient.toUnsignedWord() == 125);
 
-    // Number theory.
     var g = BigInt.init();
     defer g.deinit();
     g.gcd(&a, &b);
@@ -189,7 +166,7 @@ fn exerciseIntegers(buffer: []u8) (Failure || bigint_module.ParseError || bigint
     bezout_g.gcdext(&six, &thirty_five, &bezout_s, &bezout_t);
     try expect(bezout_g.toUnsignedWord() == 1);
 
-    // 7^13 = 96889010407, so 7^13 mod 1000 = 407.
+    // 7^13 mod 1000 = 407.
     var seven = BigInt.init();
     defer seven.deinit();
     seven.setUnsignedWord(7);
@@ -207,8 +184,7 @@ fn exerciseIntegers(buffer: []u8) (Failure || bigint_module.ParseError || bigint
     defer powers.deinit();
     powers.setUnsignedWord(3);
     powers.powAssign(40);
-    // 3^40 = 12157665459056928801, asserted as text so the fixture does not
-    // depend on the width of `unsigned long` on the checked targets.
+    // Use text for 3^40 so the fixture is independent of `unsigned long` width.
     try expectText("12157665459056928801", try powers.writeTo(buffer, 10));
     powers.powUi(1, 40);
     try expect(powers.toUnsignedWord() == 1);
@@ -216,9 +192,7 @@ fn exerciseIntegers(buffer: []u8) (Failure || bigint_module.ParseError || bigint
     var binom = BigInt.init();
     defer binom.deinit();
     binom.binUiUi(40, 20);
-    // Catalan(20) * 21 = 137846528820, which is wider than the 32-bit
-    // `unsigned long` of two checked targets, so it is parsed rather than
-    // written as a word.
+    // Parse the expected value because it exceeds 32-bit `unsigned long`.
     var expected_binom = try BigInt.parse("137846528820", 10);
     defer expected_binom.deinit();
     try expect(binom.cmp(&expected_binom) == .eq);
@@ -226,8 +200,7 @@ fn exerciseIntegers(buffer: []u8) (Failure || bigint_module.ParseError || bigint
     try expectText("15511210043330985984000000", try binom.writeTo(buffer, 10));
     binom.fibUi(100);
     try expectText("354224848179261915075", try binom.writeTo(buffer, 10));
-    // A Fibonacci number above 2^64 is composite often enough that only the
-    // definite answer is asserted.
+    // Assert only GMP's definite composite result for this large Fibonacci value.
     try expect(binom.probabPrime(15) == 0);
 
     // Modular inverse: 3^-1 mod 5 = 2, and an even value is not invertible.
@@ -246,7 +219,6 @@ fn exerciseIntegers(buffer: []u8) (Failure || bigint_module.ParseError || bigint
     four.setUnsignedWord(4);
     try expect(!inverse.invert(&four, &eight));
 
-    // Bits.
     var bits = BigInt.init();
     defer bits.deinit();
     bits.setUnsignedWord(1);
@@ -264,10 +236,7 @@ fn exerciseIntegers(buffer: []u8) (Failure || bigint_module.ParseError || bigint
     try expect(bits.sign() == -1);
     bits.absAssign();
     try expect(bits.isPositive());
-    // `mpz_com` is `-op - 1`, which is GMP's only complement, so the value 1
-    // becomes -2. `sign` reports -1 for any negative value, so the value
-    // itself is what distinguishes -2 from -1, and -2 fits every target's
-    // machine word.
+    // GMP complement is `-x - 1`, so complementing 1 gives -2.
     bits.comAssign();
     try expect(bits.sign() == -1);
     try expect(bits.toSignedWord() == -2);
@@ -276,11 +245,7 @@ fn exerciseIntegers(buffer: []u8) (Failure || bigint_module.ParseError || bigint
     try expect(bits.fitsUnsignedWord());
     try expect(bits.fitsSignedWord());
 
-    // `shrAssign` is `mpz_fdiv_q_2exp`, which floors, so -7/2 is -4 and not
-    // the -3 a truncating shift would give. `mpz_fdiv_q_2exp` is `dir = -1`
-    // in `cfdiv_q_2exp` (`mpz/cfdiv_q_2exp.c:108-111`), where `rmask` is
-    // all-ones for a negative input (`:67-70`) so any dropped low limb sets
-    // `round` and the quotient is incremented (`:81-86`).
+    // GMP's `fdiv` shift floors: `-7 / 2` becomes -4.
     var shifted = BigInt.init();
     defer shifted.deinit();
     try shifted.setStr("-7", 10);
@@ -288,13 +253,7 @@ fn exerciseIntegers(buffer: []u8) (Failure || bigint_module.ParseError || bigint
     try expect(shifted.isNegative());
     try expectText("-4", try shifted.writeTo(buffer, 10));
 
-    // Bitwise operators. Each expected value is worked out by hand from the
-    // binary expansion, not read back from GMP:
-    //   0b1100 = 12, 0b1010 = 10
-    //   and    = 0b1000 = 8
-    //   or     = 0b1110 = 14
-    //   xor    = 0b0110 = 6
-    // `popCount` counts the ones of the absolute value, and 0b1110 has three.
+    // Expected bitwise results: 12 & 10 = 8, 12 | 10 = 14, and 12 ^ 10 = 6.
     var twelve = BigInt.init();
     defer twelve.deinit();
     twelve.setUnsignedWord(12);
@@ -313,8 +272,6 @@ fn exerciseIntegers(buffer: []u8) (Failure || bigint_module.ParseError || bigint
     try expect(combined.toUnsignedWord() == 6);
     try expect(combined.popCount() == 2);
 
-    // The raw escape hatch reaches the same value through `rawPtr`, with the
-    // read-only operand taken through `rawSrcPtr`.
     bits.setUnsignedWord(255);
     c.mpz_add_ui(bits.rawPtr(), bits.rawSrcPtr(), 1);
     try expect(bits.toUnsignedWord() == 256);
@@ -334,10 +291,7 @@ fn exerciseIntegers(buffer: []u8) (Failure || bigint_module.ParseError || bigint
     try expectText("ff", owned.slice());
     owned.deinit();
 
-    // The published capacity bound at its exact boundary. `-7` is one digit
-    // with a sign, so the manual's `mpz_sizeinbase + 2` is three bytes, and
-    // those three bytes are exactly what the rendering occupies including the
-    // NUL.
+    // `-7` needs exactly `sizeinbase + 2 == 3` bytes, including its NUL.
     var boundary = try BigInt.parse("-7", 10);
     defer boundary.deinit();
     var exact_fit: [3]u8 = undefined;
@@ -345,8 +299,7 @@ fn exerciseIntegers(buffer: []u8) (Failure || bigint_module.ParseError || bigint
     var one_short: [2]u8 = undefined;
     try expectFailure(error.BufferTooSmall, boundary.writeTo(&one_short, 10));
 
-    // Base 0 is a parsing convention; rendering and the digit count that sizes
-    // the buffer need a real base.
+    // Base 0 is for parsing; rendering requires a base in 2..62.
     try expectFailure(error.InvalidBase, boundary.writeTo(&exact_fit, 0));
     try expectFailure(error.InvalidBase, boundary.writeTo(&exact_fit, 1));
     try expectFailure(error.InvalidBase, boundary.sizeinbase(0));
@@ -422,15 +375,13 @@ fn exerciseRationals(buffer: []u8) (Failure || rational_module.ParseError || rat
     defer six.deinit();
     var eight = try BigInt.parse("8", 10);
     defer eight.deinit();
-    // `mpq_set_str` parses the two parts without reducing them, so parsing is
-    // where an unreduced value comes from and `canonicalize` is what fixes it.
+    // `mpq_set_str` does not reduce; `canonicalize` does.
     var unsimplified = try Rational.parse("6/8", 10);
     defer unsimplified.deinit();
     try expectText("6/8", try unsimplified.writeTo(buffer, 10));
     unsimplified.canonicalize();
     try expectText("3/4", try unsimplified.writeTo(buffer, 10));
 
-    // `setFraction` reduces as it goes, so it never needs a second pass.
     var reduced = Rational.init();
     defer reduced.deinit();
     reduced.setFraction(&six, &eight);
@@ -440,9 +391,7 @@ fn exerciseRationals(buffer: []u8) (Failure || rational_module.ParseError || rat
     try expectText("5/6", owned.slice());
     owned.deinit();
 
-    // `mpz_sizeinbase(1) + mpz_sizeinbase(2) + 3` is five bytes, while `-1/2`
-    // and its NUL is exactly four: the bound is an upper bound, so the four
-    // byte buffer is rejected even though this value would have fitted.
+    // This upper-bound buffer rejects four bytes even though `-1/2` fits.
     var negative = Rational.init();
     defer negative.deinit();
     negative.set(&half);
@@ -466,39 +415,23 @@ fn exerciseFloats(buffer: []u8) (Failure || float_module.ParseError || float_mod
     var root = Float.init(256);
     defer root.deinit();
     root.sqrt(&two);
-    // The exact square root of two begins 1.4142135623730950488016887..., so
-    // its first 22 significant digits are `1414213562373095048801` and its 23rd
-    // digit is a 6. `mpf_get_str` asks `mpn_get_str` for one digit more than
-    // requested and rounds half up on `tstr[n_digits] * 2 >= base`
-    // (`mpf/get_str.c:223`, `:256-262`). Here 6 * 2 >= 10, so the last digit
-    // is carried from 1 to 2. Twenty-two digits rather than twenty-one because
-    // the 21st digit is a zero and `mpf_get_str` strips trailing zeros
-    // (`mpf/get_str.c:291-292`), which would silently shorten the answer. The
-    // radix point stays implicit, and the exponent is 1 because the value lies
-    // between 1 and 10.
+    // GMP rounds the 23rd sqrt(2) digit up for this 22-digit result.
+    // Trailing zeros are removed, and the exponent keeps the radix point implicit.
     const rendered = try root.writeTo(buffer, 10, 22);
     try expectText("1414213562373095048802", rendered.text);
     try expect(rendered.exponent == 1);
     // `mpf_get_d` truncates toward zero (doc/gmp.texi:4944-4946).
     try expect(root.getDouble() == @as(f64, 1.414213562373095));
 
-    // GMP stores the precision as a limb count that it rounds the requested
-    // bits up to, so a 512 bit request comes back as 512 or more on every
-    // target (`gmp-impl.h:4433-4440`, `mpf/set_prc_raw.c`), and a value that
-    // is exact in binary is unchanged by the wider precision.
+    // GMP rounds precision to whole limbs; exact binary values remain unchanged.
     var scaled = try Float.parse("1.5", 128);
     defer scaled.deinit();
     scaled.setPrecision(512);
     try expect(scaled.getPrecision() >= 512);
     try expect(scaled.getDouble() == 1.5);
 
-    // `mpf_add` and `mpf_sub` truncate to the destination's precision
-    // (`doc/gmp.texi:4700-4702`), so this pair uses values that are exact in
-    // binary at every precision involved. 3.5 and 1.5 are exact three-bit
-    // significands, so `(1.5 + 2) - 1.5` is exactly 2 with nothing truncated
-    // away. Adding the 256-bit square root instead would leave a truncation
-    // residue far below 1, and `cmpUnsignedWord` compares against the integer
-    // exactly.
+    // `mpf_add` and `mpf_sub` truncate to the destination precision.
+    // These values are exact at both tested precisions.
     var sum = Float.init(128);
     defer sum.deinit();
     sum.add(&scaled, &two);
@@ -540,9 +473,7 @@ fn exerciseFloats(buffer: []u8) (Failure || float_module.ParseError || float_mod
     try copied.setStr(" 1.5", 0);
     try expect(copied.getDouble() == 1.5);
 
-    // `digits + 2` is the capacity and `digits` has to be stated. Trailing
-    // zeros are stripped and the radix point stays implicit, so ten requested
-    // digits of 2 render as the single digit "2" at exponent 1.
+    // GMP strips trailing zeros; ten requested digits of 2 return `2` at exponent 1.
     var exact: [12]u8 = undefined;
     const rendered_two = try two.writeTo(&exact, 10, 10);
     try expectText("2", rendered_two.text);
@@ -552,7 +483,6 @@ fn exerciseFloats(buffer: []u8) (Failure || float_module.ParseError || float_mod
     try expectFailure(error.InvalidDigitCount, two.writeTo(&exact, 10, 0));
     try expectFailure(error.InvalidBase, two.writeTo(&exact, 0, 10));
 
-    // The raw escape hatch reaches the same value through `rawPtr`.
     c.mpf_set_ui(copied.rawPtr(), 5);
     try expect(copied.cmpUnsignedWord(5) == .eq);
 }
@@ -566,23 +496,11 @@ fn exerciseRandom() (Failure || rand_module.Error)!void {
     const seed: c_ulong = 20240917;
     first.seed(seed);
     second.seed(seed);
-    // GMP's default generator is the Mersenne Twister, so identically seeded
-    // states produce identical sequences. Every draw is taken from both
-    // states, one after the other, so the two stay at the same position of
-    // the stream: a draw taken from one state alone would leave the next pair
-    // comparing two different positions, which is not a statement about the
-    // seed at all.
+    // Advance both states equally so comparisons test seed, not stream position.
     for (0..8) |_| {
         try expect((try first.nextBits(32)) == (try second.nextBits(32)));
         try expect((try first.nextBits(16)) == (try second.nextBits(16)));
-        // Every draw below is taken from both states, one after the other, so
-        // the two stay at the same position of the stream. A bound draw from
-        // one state alone would leave the next pair comparing two different
-        // positions, which is not a statement about the seed at all.
-        //
-        // A bound of 1000 is not a power of two, which is the case a
-        // rejection sampler has to get right; the comparison is the range
-        // check and the equality is the seed check, on the same draw.
+        // Bound 1000 exercises rejection sampling while the streams stay aligned.
         const first_below = try first.nextBelow(1000);
         const second_below = try second.nextBelow(1000);
         try expect(first_below < 1000);
@@ -592,8 +510,7 @@ fn exerciseRandom() (Failure || rand_module.Error)!void {
         try expect((try first.nextBelow(1)) == 0);
         try expect((try second.nextBelow(1)) == 0);
 
-        // The two conditions the manual states are refused before GMP is
-        // called, so neither draw moves the state.
+        // Rejected arguments do not reach GMP or advance either state.
         try expectFailure(error.EmptyRange, first.nextBelow(0));
         try expectFailure(error.TooManyBits, first.nextBits(@bitSizeOf(c_ulong) + 1));
     }

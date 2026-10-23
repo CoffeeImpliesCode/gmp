@@ -1,15 +1,5 @@
-# One derivation. `linkage` selects the variant; the entry points supply it.
-# No flake, no sibling import, no host path, no build-time download.
-# `zig build` owns the C flags, the source list, the generated headers and
-# every installed artifact, header, licence record and pkg-config file, the
-# fork's own records included, so this file writes no path of its own and no
-# installed file has a second writer.
-#
-# `-Dtarget` is deliberately absent: this derivation is native (guarded below),
-# so the build graph derives GMP's configuration from the host target.
-# `-Dcpu=baseline` is declared and consumed by `b.standardTargetOptions`, which
-# this build graph calls; it constrains Zig's own codegen, not GMP's mpn
-# selection, which stays `generic` with `NO_ASM`.
+# Native single-derivation package; the Zig build graph owns source selection and installation.
+# GMP uses generic mpn sources with NO_ASM; -Dcpu=baseline affects Zig codegen.
 
 { lib, stdenv, zig, linkage ? "static" }:
 
@@ -53,8 +43,7 @@ stdenv.mkDerivation {
   strictDeps = true;
   nativeBuildInputs = [ zig ];
 
-  # Install only: `zig build install` is the single real build. dontInstall stays
-  # unset, or the install phase below would never run.
+  # Keep install enabled: zig build install performs the complete build.
   dontConfigure = true;
   dontBuild = true;
   dontCheck = true;
@@ -80,8 +69,7 @@ stdenv.mkDerivation {
 
   meta = {
     description = "GNU Multiple Precision Arithmetic Library, built from vendored sources with Zig";
-    # Upstream offers LGPLv3 or later, or GPLv2 or later; this build selects the
-    # LGPLv3 option. NOTICE.md is the per-file inventory.
+    # Select LGPLv3-or-later; NOTICE.md inventories per-file terms.
     license = lib.licenses.lgpl3Plus;
     platforms = lib.platforms.unix;
   };

@@ -1,5 +1,4 @@
-# devenv input. This is the devenv distribution of nixpkgs; flake.nix pins
-# NixOS/nixpkgs for packaging. devenv.lock belongs to the driver.
+# devenv nixpkgs input; flake.nix pins packaging nixpkgs separately.
 
 inputs:
   nixpkgs:

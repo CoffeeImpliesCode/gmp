@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
-//
-// Fork-authored. `FORK-LICENSE.md` records the owner's authorization of that
-// grant for this file; the four `COPYING*` texts in `.paths` are upstream's
-// own LGPLv3-or-later and GPLv2-or-later terms, unmodified.
+// Fork-authored under FORK-LICENSE.md; COPYING* remain upstream's unmodified terms.
 .{
     .name = .gmp,
     .version = "6.3.0",
@@ -10,12 +7,7 @@
     .fingerprint = 0x328f6061da525515,
     .license = "LGPL-3.0-or-later OR GPL-2.0-or-later",
 
-    // The upstream GMP 6.3.0 release tree, plus this fork's build, package,
-    // test, example and documentation files. Autotools scaffolding, the
-    // upstream test suite, the demo and tuning programs and the per CPU
-    // assembly directories are kept so the import stays pristine, even though
-    // the Zig build compiles none of them. Build output directories are
-    // excluded so a normal build never contaminates a package.
+    // Upstream source and supporting fork files; unused upstream files remain for provenance.
     .paths = .{
         "build.zig",
         "build.zig.zon",
@@ -23,12 +15,7 @@
         "include",
         "zig",
         "tools",
-        // The runtime-loading route: the reusable loader core, this SDK's half
-        // of it, the generator that writes the dispatch from the translated
-        // header, the build half that wires them together, and the
-        // synchronization binding the dispatch compiles. Every one of those six
-        // files is imported or compiled by a step, so a materialised copy has
-        // to carry the directory whole.
+        // Runtime loader and its build, generator, consumer, and binding support.
         "runtime",
         "consumer/build.zig",
         "consumer/build.zig.zon",
@@ -78,17 +65,9 @@
         "gmpxx.pc.in",
         "invalid.c",
         "longlong.h",
-        // The build never runs autotools, but `build.zig` derives the shared
-        // library's libtool version from `Makefile.am:107-109`, so the file
-        // that fixes those numbers travels with the package and that claim
-        // stays checkable in a materialised copy.
+        // Kept to check the shared library's libtool version declared in Makefile.am.
         "Makefile.am",
-        // The autotools scaffolding and helper scripts `UPSTREAM.sha256`
-        // records. None of them is compiled and no step reads them, but
-        // `tools/provenance_gate.sh` re-verifies every one of the 2156 records
-        // with `sha256sum --check` from the package root, so a file the record
-        // pins and the package does not carry makes `zig build provenance` fail
-        // on a missing file rather than on a changed byte.
+        // Upstream inputs recorded in UPSTREAM.sha256 and checked by the provenance step.
         ".gdbinit",
         "ChangeLog",
         "INSTALL",
@@ -124,28 +103,16 @@
         "README.md",
         "README.upstream.md",
         "README.zig.md",
-        // The per-file record of the pinned archive. The gate reads it before
-        // any other check, so a package that does not carry it fails
-        // `zig build provenance` on its first check rather than on a
-        // divergence; every file it names is in `.paths` for the same reason.
+        // Pinned archive digests consumed by the provenance step.
         "UPSTREAM.sha256",
         "UPSTREAM.md",
-        // The portable per-SDK derivation and the development environment.
-        // They are inputs to a build of this package from outside it, so they
-        // belong to its source set.
+        // Nix and devenv package inputs.
         "package.nix",
         "flake.nix",
-        // The flake's resolved input. `flake.nix` pins nixpkgs by revision and
-        // this records what that revision resolved to, so the Nix entry points
-        // in a materialised copy build against the input this tree resolves
-        // rather than resolving a new one.
+        // Lockfile for the flake's resolved nixpkgs revision.
         "flake.lock",
         "devenv.nix",
         "devenv.yaml",
         ".envrc",
-        // `.github` and `.gitignore` are this fork's own, and are deliberately
-        // not listed: no step of this build graph reads them and the provenance
-        // gate does not name them, so carrying them would add bytes without
-        // adding a checkable input.
     },
 }

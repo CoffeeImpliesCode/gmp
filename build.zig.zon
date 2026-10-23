@@ -3,7 +3,7 @@
 .{
     .name = .gmp,
     .version = "6.3.0",
-    .minimum_zig_version = "0.16.0",
+    .minimum_zig_version = "0.17.0",
     .fingerprint = 0x328f6061da525515,
     .license = "LGPL-3.0-or-later OR GPL-2.0-or-later",
 

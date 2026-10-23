@@ -134,7 +134,7 @@ fn obstackVprintfAvailable(target: std.Target) bool {
 /// Derive GMP configuration from target, optimize mode, and DLL artifact kind.
 pub fn paramsFor(
     target: std.Target,
-    optimize: std.builtin.OptimizeMode,
+    optimize: std.lang.Optimize,
     libgmp_dll: bool,
 ) Params {
     const ptr_bits = pointerBits(target.cpu.arch);
@@ -168,7 +168,7 @@ pub fn paramsFor(
         .have_quad_t = target.os.tag != .windows,
         // Only glibc provides the selected obstack interface.
         .have_obstack_vprintf = obstackVprintfAvailable(target),
-        .want_assert = optimize == .Debug,
+        .want_assert = optimize == .debug,
         .libgmp_dll = libgmp_dll and target.os.tag == .windows,
     };
 }
@@ -421,7 +421,7 @@ pub fn limbTypeName(p: Params) []const u8 {
 
 /// Generate `gmp.h`'s comment with its ABI-critical values.
 fn gmpHPrologue(gpa: std.mem.Allocator, p: Params) ![]u8 {
-    return std.fmt.allocPrint(gpa,
+    return gpa.print(
         \\/* gmp.h.  Generated from gmp-h.in by the Zig build of this GMP fork;
         \\   do not edit.  Upstream input: GMP 6.3.0 (LGPLv3 or later, or GPLv2 or
         \\   later).  Backend: portable C, mpn path "generic", NO_ASM.

@@ -49,7 +49,7 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const use_system_library = b.systemIntegrationOption("gmp", .{});
     const linkage_option = b.option(
-        std.builtin.LinkMode,
+        std.lang.LinkMode,
         "linkage",
         "Build libgmp as a static archive or as a shared library. Static is " ++
             "this fork's default and matches a GMP configured --disable-shared. " ++
@@ -59,9 +59,9 @@ pub fn build(b: *std.Build) void {
             "mode this graph builds no artifact, so there the option names the " ++
             "kind of installed library to bind to instead.",
     );
-    const linkage = linkage_option orelse std.builtin.LinkMode.static;
+    const linkage = linkage_option orelse std.lang.LinkMode.static;
     // Linkage used when binding an installed GMP; system mode defaults to dynamic.
-    const system_linkage = linkage_option orelse std.builtin.LinkMode.dynamic;
+    const system_linkage = linkage_option orelse std.lang.LinkMode.dynamic;
 
     // Runtime dispatch is opt-in.
     const runtime_loaded = b.option(
@@ -107,7 +107,7 @@ pub fn build(b: *std.Build) void {
     else
         example);
     smoke_run.step.dependOn(b.getInstallStep());
-    if (b.args) |args| smoke_run.addArgs(args);
+    smoke_run.addPassthruArgs();
     const smoke_step = b.step("smoke", "Run the example and print deterministic results");
     smoke_step.dependOn(&smoke_run.step);
 
@@ -122,7 +122,7 @@ pub fn build(b: *std.Build) void {
     // Compile the facade, example, and tests for the checked targets without running them.
     const check_step = b.step("check", "Compile the public facade, tests and example");
     if (!target.query.isNative()) {
-        addTargetCheck(b, check_step, target.query, .Debug, linkage, runtime_loaded, "gmp-check");
+        addTargetCheck(b, check_step, target.query, .debug, linkage, runtime_loaded, "gmp-check");
     } else {
         for (checked_targets) |triple| {
             const query = std.Build.parseTargetQuery(.{ .arch_os_abi = triple }) catch |err| {
@@ -132,7 +132,7 @@ pub fn build(b: *std.Build) void {
                 b,
                 check_step,
                 query,
-                .Debug,
+                .debug,
                 linkage,
                 runtime_loaded,
                 b.fmt("gmp-check-{s}", .{triple}),
@@ -148,8 +148,8 @@ fn addTargetCheck(
     b: *std.Build,
     check_step: *std.Build.Step,
     query: std.Target.Query,
-    optimize: std.builtin.OptimizeMode,
-    linkage: std.builtin.LinkMode,
+    optimize: std.lang.Optimize,
+    linkage: std.lang.LinkMode,
     runtime_loaded: bool,
     name: []const u8,
 ) void {
@@ -278,11 +278,11 @@ fn needsBothLoaders(
 fn makeLibrary(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
+    optimize: std.lang.Optimize,
     gmp_module: *std.Build.Module,
     use_system_library: bool,
-    system_linkage: std.builtin.LinkMode,
-    linkage: std.builtin.LinkMode,
+    system_linkage: std.lang.LinkMode,
+    linkage: std.lang.LinkMode,
     runtime_loaded: bool,
     install: bool,
 ) Library {
@@ -312,9 +312,9 @@ fn makeLibrary(
 fn makeBundledLibrary(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
+    optimize: std.lang.Optimize,
     gmp_module: *std.Build.Module,
-    linkage: std.builtin.LinkMode,
+    linkage: std.lang.LinkMode,
     runtime_loaded: bool,
     install: bool,
 ) Library.Bundled {
@@ -345,7 +345,7 @@ fn makeBundledLibrary(
 
     // GMP's printf dispatch uses incompatible callback casts (`printf/printffuns.c:76`).
     // Disable the function sanitizer for non-Debug library C builds.
-    const c_source_flags: []const []const u8 = if (optimize == .Debug)
+    const c_source_flags: []const []const u8 = if (optimize == .debug)
         &.{"-D__GMP_WITHIN_GMP"}
     else
         &.{ "-D__GMP_WITHIN_GMP", "-fno-sanitize=function" };
@@ -413,9 +413,9 @@ fn makeBundledLibrary(
 fn makeSystemLibrary(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
+    optimize: std.lang.Optimize,
     gmp_module: *std.Build.Module,
-    system_linkage: std.builtin.LinkMode,
+    system_linkage: std.lang.LinkMode,
 ) Library {
     const translate = translateC(b, target, optimize, null);
     translate.linkSystemLibrary("gmp", .{ .preferred_link_mode = system_linkage });
@@ -428,16 +428,17 @@ fn makeSystemLibrary(
 /// Preprocessing route for the target's aggregate header.
 const AggregateRoute = enum { aro, preprocessed };
 
-/// NetBSD `_Pragma`, OpenBSD 32-bit `size_t`, and MIPS64 endian macros exceed Aro support.
-/// Select target-compiler preprocessing by OS tag for every architecture in those families.
+/// Non-Linux cross targets need preprocessing to exclude translator host headers.
+/// Clang-preprocessed glibc float typedefs conflict with Aro's type specifiers.
 fn aggregateRoute(target: std.Build.ResolvedTarget) AggregateRoute {
+    if (!target.query.isNative() and target.result.os.tag != .linux) return .preprocessed;
     return switch (target.result.os.tag) {
         .netbsd, .openbsd => .preprocessed,
         else => .aro,
     };
 }
 
-/// Preprocess the aggregate header with the target compiler for NetBSD and OpenBSD.
+/// Preprocess the aggregate header with the target compiler.
 /// `-dD` preserves public macros; the depfile tracks the headers opened by this step.
 fn preprocessedAggregate(
     b: *std.Build,
@@ -453,15 +454,15 @@ fn preprocessedAggregate(
     }
     if (generated) |tree| {
         // Match the translation step's include root so both read the same `gmp.h`.
-        run.addPrefixedDirectoryArg("-I", tree.directory);
+        run.addDirectoryArg2(tree.directory, .{ .prefix = "-I" });
         // Declare the generated header as a direct graph dependency.
         tree.gmp_header.addStepDependencies(&run.step);
     }
     run.addArg("-o");
-    const preprocessed = run.addOutputFileArg("gmp-translate.c");
+    const preprocessed = run.addOutputFileArg2("gmp-translate.c", .{});
     run.addArg("-MD");
-    _ = run.addPrefixedDepFileOutputArg("-MF", "gmp-translate.d");
-    run.addFileArg(b.path("include/gmp_all.h"));
+    _ = run.addDepFileOutputArg2("gmp-translate.d", .{ .prefix = "-MF" });
+    run.addFileArg2(b.path("include/gmp_all.h"), .{});
     return preprocessed;
 }
 
@@ -469,7 +470,7 @@ fn preprocessedAggregate(
 fn translateC(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
+    optimize: std.lang.Optimize,
     generated: ?Generated,
 ) *std.Build.Step.TranslateC {
     const translate = b.addTranslateC(.{
@@ -508,7 +509,7 @@ const Generated = struct {
 
 fn generate(
     b: *std.Build,
-    optimize: std.builtin.OptimizeMode,
+    optimize: std.lang.Optimize,
     params: config.Params,
 ) Generated {
     const output = b.addWriteFiles();
@@ -582,7 +583,10 @@ fn generate(
 }
 
 fn readPackageFile(b: *std.Build, name: []const u8) []u8 {
-    return b.build_root.handle.readFileAlloc(b.graph.io, name, b.allocator, .limited(8 << 20)) catch |err| {
+    b.dependOnFileContents(b.path(name));
+    const root_relative_path = if (b.root.sub_path.len == 0) name else
+        std.fs.path.join(b.allocator, &.{ b.root.sub_path, name }) catch @panic("OOM");
+    return b.root.root_dir.handle.readFileAlloc(b.graph.io, root_relative_path, b.allocator, .limited(8 << 20)) catch |err| {
         std.debug.panic("cannot read GMP template {s}: {s}", .{ name, @errorName(err) });
     };
 }
@@ -595,7 +599,7 @@ fn generatorProgram(
 ) *std.Build.Step.Compile {
     const module = b.createModule(.{
         .target = b.graph.host,
-        .optimize = .ReleaseSafe,
+        .optimize = .safe,
         .link_libc = true,
     });
     // gen-*.c includes bootstrap.c from the package root.
@@ -621,7 +625,7 @@ fn runGenerator(
 fn addExample(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
+    optimize: std.lang.Optimize,
     gmp_module: *std.Build.Module,
     name: []const u8,
 ) *std.Build.Step.Compile {
@@ -638,7 +642,7 @@ fn addExample(
 fn addInstallFacade(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
+    optimize: std.lang.Optimize,
     library: Library,
 ) ?*std.Build.Module {
     const bundled = switch (library) {
@@ -661,7 +665,7 @@ fn addInstallFacade(
 fn addTests(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
+    optimize: std.lang.Optimize,
     gmp_module: *std.Build.Module,
     library: Library,
     name: []const u8,
@@ -681,8 +685,8 @@ fn addTests(
 
 fn addProvenanceStep(b: *std.Build) void {
     const run = b.addSystemCommand(&.{"sh"});
-    run.addFileArg(b.path("tools/provenance_gate.sh"));
-    run.addFileArg(b.path("."));
+    run.addFileArg2(b.path("tools/provenance_gate.sh"), .{});
+    run.addDirectoryArg2(b.path("."), .{});
     run.setName("provenance gate");
 
     const step = b.step("provenance", "Verify the upstream licence texts and provenance record");

@@ -12,7 +12,7 @@ let
 
   gmpPackage =
     { linkage ? "static" }:
-    pkgs.callPackage ./package.nix { zig = pkgs.zig_0_16; inherit linkage; };
+    pkgs.callPackage ./package.nix { zig = pkgs.zig_0_17; inherit linkage; };
 
   # Quote roots so spaces remain one shell argument.
   sdkRoot = builtins.toString ./.;
@@ -52,7 +52,7 @@ let
 in
 {
   packages = [
-    pkgs.zig_0_16
+    pkgs.zig_0_17
     pkgs.pkg-config
   ];
 

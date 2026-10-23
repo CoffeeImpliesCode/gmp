@@ -1,6 +1,6 @@
 # GMP
 
-GMP 6.3.0 is packaged for Zig 0.16 as a dependency.
+GMP 6.3.0 is packaged for Zig 0.17.0 as a dependency.
 It publishes a Zig module and C-library artifact named `gmp`.
 
 ## Source deviations from upstream

@@ -1,5 +1,6 @@
 # Changelog
 
+* Port to Zig 0.17.0.
 * Raw `mpn_*` names resolve to their matching exported `__gmpn_*` symbols.
 * Runtime dispatch excludes libc symbols from the provider's required symbol set.
 * System-library mode (`-fsys=gmp`) uses the translated module and has no linkable `gmp` artifact; it rejects `-Druntime=true`.

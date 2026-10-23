@@ -13,7 +13,7 @@ pub fn build(b: *std.Build) void {
     // Forward nullable linkage and runtime options so absent values preserve dependency defaults.
     // In system mode, the dependency chooses the installed library's default linkage.
     const linkage = b.option(
-        std.builtin.LinkMode,
+        std.lang.LinkMode,
         "linkage",
         "Build libgmp as a static archive or as a shared library. Forwarded " ++
             "to the gmp dependency unchanged; with no option here the " ++
@@ -55,7 +55,7 @@ pub fn build(b: *std.Build) void {
     const run = b.addRunArtifact(exe);
     run.step.dependOn(b.getInstallStep());
     // Forward provider arguments to the runtime-loaded consumer.
-    if (b.args) |args| run.addArgs(args);
+    run.addPassthruArgs();
     const run_step = b.step("run", "Exercise the GMP API and print deterministic results");
     run_step.dependOn(&run.step);
 

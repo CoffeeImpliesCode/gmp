@@ -5,14 +5,13 @@ zig-out/
 zig-pkg/
 
 # Autotools output, present only if someone runs ./configure in the tree.
-Makefile
+/Makefile
 config.h
 config.log
 config.status
 gmp.h
 gmp.pc
 gmpxx.pc
-gmp-mparam.h
 libtool
 .deps/
 .libs/

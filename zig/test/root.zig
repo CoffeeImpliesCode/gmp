@@ -20,3 +20,19 @@ test "every public facade method produces its known answer" {
     try bootstrap.ensureLoaded();
     try gmp.api_exercise.exercise();
 }
+
+test "translated obstack declarations follow the target libc" {
+    comptime {
+        const has_obstack = @import("builtin").target.isGnuLibC();
+        if (@hasDecl(gmp.c, "__gmp_obstack_printf") != has_obstack or
+            @hasDecl(gmp.c, "__gmp_obstack_vprintf") != has_obstack)
+        {
+            @compileError("GMP obstack declarations must match the target libc");
+        }
+        if (has_obstack) {
+            _ = gmp.c.struct_obstack;
+            _ = @TypeOf(gmp.c.__gmp_obstack_printf);
+            _ = @TypeOf(gmp.c.__gmp_obstack_vprintf);
+        }
+    }
+}

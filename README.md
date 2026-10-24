@@ -19,7 +19,7 @@ No file in the GMP 6.3.0 source tree is patched. The fork adds the Zig facade, r
 
 ## Support matrix
 
-`zig build check` compiles the facade, tests, and example for these configured targets. It does not run cross-compiled binaries.
+`zig build check` compiles the facade, tests, and example for these configured targets. It does not run cross-compiled binaries. With dynamic linkage or runtime loading, the default check list excludes static-only targets. With `-Dtarget`, it checks only the selected target.
 
 | Target | Build configuration |
 | --- | --- |
@@ -28,7 +28,7 @@ No file in the GMP 6.3.0 source tree is patched. The fork adds the Zig facade, r
 | `aarch64-macos-none` | Portable C backend with target-derived ABI and headers. |
 | `x86_64-windows-gnu` | Portable C backend with LLP64 limb type and target-derived headers. |
 | `riscv64-linux-gnu` | Portable C backend with target-derived ABI and headers. |
-| `wasm32-wasi` | 32-bit limbs. Enables `_WASI_EMULATED_SIGNAL` and links `wasi-emulated-signal`. |
+| `wasm32-wasi` | Static linkage only; no runtime loader. 32-bit limbs. Enables `_WASI_EMULATED_SIGNAL` and links `wasi-emulated-signal`. |
 
 ## Consumption
 

@@ -6,7 +6,7 @@ No upstream GMP source file is modified.
 
 | File | Change and reason |
 |---|---|
-| `include/gmp_all.h` | Includes `<stdarg.h>` and `<stdio.h>` before `gmp.h` to expose its gated declarations; adds guarded `mpn_*` aliases to their `__gmpn_*` symbols for translated calls; removes NetBSD's unused `__ALIGNBYTES` after preprocessing. |
+| `include/gmp_all.h` | Includes `<stdarg.h>` and `<stdio.h>` before `gmp.h` to expose its gated declarations; supplies an opaque obstack declaration for glibc translation and uses the real conditional `<obstack.h>` include for C consumers; adds guarded `mpn_*` aliases to their `__gmpn_*` symbols for translated calls; removes NetBSD's unused `__ALIGNBYTES` after preprocessing. |
 
 ## Build graph
 
@@ -15,7 +15,7 @@ No upstream GMP source file is modified.
 - Compiles the portable generic `mpn` source set: 180 C files and 16 wrappers for five multi-operation templates. It omits 29 functions with no generic C implementation, as GMP's generic configuration does. `NO_ASM` disables assembly on every target.
 - Builds GMP's seven table generators for the host, then runs them with the target's limb and nail sizes. Generated headers, tables, and wrappers live in the Zig cache, not the source tree.
 - Translates `include/gmp_all.h` to expose the complete C API. NetBSD and OpenBSD use `zig cc -E -dD` first because Aro cannot parse parts of their system headers. A depfile tracks the headers read by that preprocessing step.
-- Zig 0.17 non-Linux cross-target translation uses target-compiler preprocessing to exclude host headers. Linux uses Aro directly because Clang-preprocessed glibc float typedefs conflict with Aro's type specifiers.
+- Zig 0.17 non-Linux cross-target translation uses target-compiler preprocessing to exclude host headers. Linux uses Aro directly because Clang-preprocessed glibc float typedefs conflict with Aro's type specifiers. Both routes select obstack declarations from the target libc without parsing glibc's Aro-incompatible `<obstack.h>`.
 - Adds `-fno-sanitize=function` to GMP's native C sources outside Debug. Upstream's `printf` callback table casts incompatible function-pointer types; other C and Zig safety checks remain enabled.
 - `-fsys=gmp` translates and links the installed GMP without building an artifact. It cannot be combined with `-Druntime=true`. The bundled runtime route uses a generated dispatch and does not link the library into the module; provider validation checks limb width.
 - Renders `gmp.pc` with paths relative to its installed location. The build installs the library, public headers, licence records, and upstream release records.

@@ -123,12 +123,7 @@ fn unsignedLongBits(target: std.Target, ptr_bits: u16) u16 {
 
 /// Whether this target provides the glibc-specific obstack interface.
 fn obstackVprintfAvailable(target: std.Target) bool {
-    if (target.os.tag != .linux) return false;
-    return switch (target.abi) {
-        // Include x32 explicitly; it is glibc despite its distinct ABI tag.
-        .gnu, .gnux32 => true,
-        else => false,
-    };
+    return target.isGnuLibC();
 }
 
 /// Derive GMP configuration from target, optimize mode, and DLL artifact kind.

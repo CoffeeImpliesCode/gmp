@@ -1,5 +1,6 @@
 # Changelog
 
+* Fix Linux header translation with target-derived obstack declarations; exclude WASI from dynamic and runtime cross-target checks.
 * Port to Zig 0.17.0.
 * Raw `mpn_*` names resolve to their matching exported `__gmpn_*` symbols.
 * Runtime dispatch excludes libc symbols from the provider's required symbol set.
@@ -21,4 +22,3 @@
 * Table generators run on the build host with the target's limb parameters; generated files stay in the Zig cache.
 * The library uses GMP's portable generic C backend with `NO_ASM`; it does not select tuned assembly.
 * The package builds `libgmp`, not `libgmpxx` or `mini-gmp`, and includes the complete generic-path public C API.
-* `wasm32-wasi` is unsupported because GMP's invalid-operation handler requires signal support unavailable in wasi-libc.

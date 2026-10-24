@@ -25,16 +25,9 @@
  * and they are what a real GMP program has already pulled in by the time it
  * calls those functions.
  *
- * `gmp_obstack_printf` and `gmp_obstack_vprintf` are gated the same way, on
- * `<obstack.h>` having been included: `gmp-h.in:275-281` declines to declare
- * a prototype mentioning `struct obstack *` unless `_OBSTACK_H` is already
- * defined, because declaring it before the struct is real scopes the struct
- * down and conflicts with a later definition. Upstream leaves it to the
- * application to include it, which is why this file has to: without it, the
- * two obstack entry points are missing from `gmp.c` even though the archive
- * defines them. Only glibc has that header, so the include is conditional on
- * the platform providing it, and is a no-op everywhere else - the same
- * `__has_include` shape a real program uses, not a fork-specific macro.
+ * Obstack declarations need a file-scope `struct obstack` and `_OBSTACK_H`
+ * (`gmp-h.in:275-281`). Translation supplies these only for glibc targets
+ * without parsing glibc's Aro-incompatible `<obstack.h>`.
  *
  * Upstream input: GNU MP 6.3.0, LGPLv3 or later, or GPLv2 or later.
  *
@@ -42,20 +35,19 @@
  * `gmp.h` carries `__GMP_LIBGMP_DLL` 1 for a shared libgmp, so everything
  * here is declared `__declspec(dllimport)` for a consumer, and
  * `__declspec(dllexport)` only where `__GMP_WITHIN_GMP` is defined, which is
- * inside the library itself and never on a translation line. Nothing in this
- * file depends on that distinction, so translating it needs no macro of its
- * own.
+ * inside the library itself and never on a translation line.
  */
 
 #include <stdarg.h>
 #include <stdio.h>
 
-/* Where the platform ships `<obstack.h>`, pull it in so that `gmp.h` offers
- * the obstack entry points it is able to declare. `__has_include` is the
- * standard facility for exactly this question and needs no build macro, which
- * is what keeps this header behaving the same for `translate-c` and for a C
- * consumer reading it out of the installed tree. */
-#if defined(__has_include)
+/* Translation uses target-libc facts; C consumers use their real headers. */
+#if defined(GMP_ZIG_TRANSLATE)
+#if GMP_ZIG_HAVE_OBSTACK
+struct obstack;
+#define _OBSTACK_H 1
+#endif
+#elif defined(__has_include)
 #if __has_include(<obstack.h>)
 #include <obstack.h>
 #endif

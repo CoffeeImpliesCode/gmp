@@ -128,6 +128,8 @@ pub fn build(b: *std.Build) void {
             const query = std.Build.parseTargetQuery(.{ .arch_os_abi = triple }) catch |err| {
                 std.debug.panic("gmp: cannot parse checked target {s}: {s}", .{ triple, @errorName(err) });
             };
+            // WASI has neither shared libraries nor a runtime loader.
+            if (query.os_tag == .wasi and (linkage == .dynamic or runtime_loaded)) continue;
             addTargetCheck(
                 b,
                 check_step,
@@ -447,6 +449,10 @@ fn preprocessedAggregate(
 ) std.Build.LazyPath {
     const run = b.addSystemCommand(&[_][]const u8{ b.graph.zig_exe, "cc", "-E", "-dD" });
     run.setName("preprocess gmp gmp_all.h");
+    run.addArgs(&.{
+        "-DGMP_ZIG_TRANSLATE=1",
+        b.fmt("-DGMP_ZIG_HAVE_OBSTACK={s}", .{if (target.result.isGnuLibC()) "1" else "0"}),
+    });
     if (!target.query.isNative()) {
         const triple = target.query.zigTriple(b.allocator) catch @panic("gmp: unspellable target");
         run.addArg("-target");
@@ -482,6 +488,8 @@ fn translateC(
         .optimize = optimize,
         .link_libc = true,
     });
+    translate.defineCMacro("GMP_ZIG_TRANSLATE", "1");
+    translate.defineCMacro("GMP_ZIG_HAVE_OBSTACK", if (target.result.isGnuLibC()) "1" else "0");
     if (generated) |tree| translate.addIncludePath(tree.directory);
     return translate;
 }

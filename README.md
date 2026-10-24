@@ -34,12 +34,10 @@ No file in the GMP 6.3.0 source tree is patched. The fork adds the Zig facade, r
 
 ### `build.zig.zon`
 
-For a local checkout at `../gmp`, add this dependency:
+Fetch the tagged release into `build.zig.zon`:
 
-```zig
-.dependencies = .{
-    .gmp = .{ .path = "../gmp" },
-},
+```sh
+zig fetch --save git+https://github.com/CoffeeImpliesCode/gmp#v6.3.0
 ```
 
 ### `build.zig`
